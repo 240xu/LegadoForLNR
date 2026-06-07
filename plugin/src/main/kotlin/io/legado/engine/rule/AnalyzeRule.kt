@@ -108,17 +108,25 @@ class AnalyzeRule(
             mMode = Mode.Regex; isRegex = true; start = 1
         } else if (isRegex) { mMode = Mode.Regex }
         var tmp: String
-        val jsMatcher = JS_PATTERN.matcher(ruleStr)
-        while (jsMatcher.find()) {
-            if (jsMatcher.start() > start) { tmp = ruleStr.substring(start, jsMatcher.start()).trim(); if (tmp.isNotEmpty()) ruleList.add(SourceRule(tmp, mMode)) }
-            ruleList.add(SourceRule(jsMatcher.group(2) ?: jsMatcher.group(1), Mode.Js))
-            start = jsMatcher.end()
-        }
-        val webJsMatcher = WebJS_PATTERN.matcher(ruleStr)
-        while (webJsMatcher.find()) {
-            if (webJsMatcher.start() > start) { tmp = ruleStr.substring(start, webJsMatcher.start()).trim(); if (tmp.isNotEmpty()) ruleList.add(SourceRule(tmp, mMode)) }
-            ruleList.add(SourceRule(webJsMatcher.group(2) ?: webJsMatcher.group(1) ?: "", Mode.WebJs))
-            start = webJsMatcher.end()
+        while (start < ruleStr.length) {
+            val jsMatcher = JS_PATTERN.matcher(ruleStr).apply { region(start, ruleStr.length) }
+            val webJsMatcher = WebJS_PATTERN.matcher(ruleStr).apply { region(start, ruleStr.length) }
+            val hasJs = jsMatcher.find()
+            val hasWebJs = webJsMatcher.find()
+            if (!hasJs && !hasWebJs) break
+            val useWebJs = when {
+                !hasJs -> true
+                !hasWebJs -> false
+                else -> webJsMatcher.start() < jsMatcher.start()
+            }
+            val matcher = if (useWebJs) webJsMatcher else jsMatcher
+            if (matcher.start() > start) {
+                tmp = ruleStr.substring(start, matcher.start()).trim()
+                if (tmp.isNotEmpty()) ruleList.add(SourceRule(tmp, mMode))
+            }
+            val jsBody = matcher.group(2) ?: matcher.group(1) ?: ""
+            ruleList.add(SourceRule(jsBody, if (useWebJs) Mode.WebJs else Mode.Js))
+            start = matcher.end()
         }
         if (start < ruleStr.length) { tmp = ruleStr.substring(start).trim(); if (tmp.isNotEmpty()) ruleList.add(SourceRule(tmp, mMode)) }
         return ruleList
@@ -259,7 +267,8 @@ class AnalyzeRule(
             putRule(sr.putMap); result ?: continue
             val r = sr.rule
             result = when (sr.mode) {
-                Mode.Js, Mode.WebJs -> getWebJsResult(r, result as Any)
+                Mode.Js -> evalJS(r, result)
+                Mode.WebJs -> parseWebJsObject(getWebJsResult(r, result as Any))
                 Mode.Json -> getAnalyzeByJSonPath(result).getObject(r)
                 Mode.XPath -> getAnalyzeByXPath(result).getElements(r)
                 Mode.Regex -> AnalyzeByRegex.getElement(result.toString(), r.split("&&").toTypedArray())
@@ -277,7 +286,8 @@ class AnalyzeRule(
             putRule(sr.putMap); result ?: continue
             val r = sr.rule
             result = when (sr.mode) {
-                Mode.Js, Mode.WebJs -> evalJS(r, result)
+                Mode.Js -> evalJS(r, result)
+                Mode.WebJs -> parseWebJsArray(getWebJsResult(r, result as Any))
                 Mode.Json -> getAnalyzeByJSonPath(result).getList(r)
                 Mode.XPath -> getAnalyzeByXPath(result).getElements(r)
                 Mode.Regex -> AnalyzeByRegex.getElements(result.toString(), r.split("&&").toTypedArray())
@@ -295,7 +305,8 @@ class AnalyzeRule(
             putRule(sr.putMap); result ?: continue
             val r = sr.rule
             result = when (sr.mode) {
-                Mode.Js, Mode.WebJs -> getWebJsResult(r, result as Any)
+                Mode.Js -> evalJS(r, result)
+                Mode.WebJs -> parseWebJsObject(getWebJsResult(r, result as Any))
                 Mode.Json -> getAnalyzeByJSonPath(result).getObject(r)
                 Mode.XPath -> getAnalyzeByXPath(result).getElements(r)
                 else -> getAnalyzeByJSoup(result).getElements(r)
@@ -361,6 +372,14 @@ class AnalyzeRule(
             Debug.log("getWebJsResult error: " + e.message)
             result.toString()
         }
+    }
+
+    private fun parseWebJsArray(value: String): Any {
+        return GSON.fromJsonArray<Map<String, Any?>>(value) ?: value
+    }
+
+    private fun parseWebJsObject(value: String): Any {
+        return GSON.fromJsonObject<Map<String, Any?>>(value) ?: value
     }
 
     private fun getDirectValue(target: Any?, rule: String): String? {
@@ -431,7 +450,7 @@ class AnalyzeRule(
 
         init {
             rule = when {
-                mode == Mode.Js || mode == Mode.Regex -> ruleStr
+                mode == Mode.Js || mode == Mode.WebJs || mode == Mode.Regex -> ruleStr
                 ruleStr.startsWith("@CSS:", true) -> {
                     mode = Mode.Default
                     ruleStr
