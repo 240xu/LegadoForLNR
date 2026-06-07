@@ -164,7 +164,10 @@ class AnalyzeRule(
         result = c
         if (ruleList.size == 1) {
             val single = ruleList.first()
-            getDirectValue(result, single.rule)?.let { return listOf(replaceRegex(it, single)) }
+            getDirectValue(result, single.rule)?.let {
+                val value = replaceRegex(it, single)
+                return if (isUrl) listOf(toAbsoluteUrl(value)) else listOf(value)
+            }
         }
         for (sr in ruleList) {
             putRule(sr.putMap); sr.makeUpRule(result); result ?: continue
@@ -184,7 +187,9 @@ class AnalyzeRule(
         }
         if (result == null) return null
         if (result is String) result = result.split("\n")
-        @Suppress("UNCHECKED_CAST") return result as? List<String>
+        @Suppress("UNCHECKED_CAST")
+        val list = result as? List<String> ?: return null
+        return if (isUrl) list.map { toAbsoluteUrl(it) } else list
     }
 
     fun getString(ruleStr: String?, mContent: Any? = null, isUrl: Boolean = false): String {
@@ -202,7 +207,7 @@ class AnalyzeRule(
 
     fun getString(ruleStr: String?, unescape: Boolean): String {
         if (ruleStr.isNullOrEmpty()) return ""
-        return getString(splitSourceRuleCacheString(ruleStr), null, false)
+        return getString(splitSourceRuleCacheString(ruleStr), null, false, unescape)
     }
 
     fun getString(ruleList: List<SourceRule>, mContent: Any? = null, isUrl: Boolean = false, unescape: Boolean = true): String {
@@ -240,8 +245,9 @@ class AnalyzeRule(
         } // end else (not NativeObject/LinkedTreeMap)
         if (result == null) return ""
         val str = result.toString()
-        if (isUrl && str.isNotBlank()) { return AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), str) }
-        return StringEscapeUtils.unescapeHtml4(str)
+        val value = if (unescape) StringEscapeUtils.unescapeHtml4(str) else str
+        if (isUrl && value.isNotBlank()) return toAbsoluteUrl(value)
+        return value
     }
 
     fun getElement(ruleStr: String): Any? {
@@ -389,6 +395,12 @@ class AnalyzeRule(
             is Scriptable -> listOf(value)
             else -> emptyList()
         }
+    }
+
+    private fun toAbsoluteUrl(value: String): String {
+        val clean = value.trim()
+        if (clean.isBlank()) return clean
+        return AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), clean)
     }
 
     private fun getOrCreateSingleSourceRule(rule: String): List<SourceRule> {

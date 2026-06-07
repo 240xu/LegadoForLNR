@@ -137,6 +137,14 @@ class AnalyzeUrl(
                 val value = evalPageExpr(expr, p).toString()
                 ruleUrl = ruleUrl.replace(matcher.group(), value)
             }
+            val legacyMatcher = legacyPagePattern.matcher(ruleUrl)
+            while (legacyMatcher.find()) {
+                val pages = legacyMatcher.group(1)?.split(",").orEmpty()
+                if (pages.isNotEmpty()) {
+                    val replacement = pages.getOrElse((p - 1).coerceAtLeast(0)) { pages.last() }.trim()
+                    ruleUrl = ruleUrl.replace(legacyMatcher.group(), replacement)
+                }
+            }
         }
     }
 
@@ -181,14 +189,20 @@ class AnalyzeUrl(
                 if (b.trimStart().let { it.startsWith("{") && it.endsWith("}") || it.startsWith("[") && it.endsWith("]") || it.startsWith("<") }) {
                     // JSON/XML body, keep as-is
                 } else {
-                    encodedForm = b
+                    encodedForm = encodeParams(b, charset, false)
+                }
+            } else if (method != "POST") {
+                val pos = url.indexOf('?')
+                if (pos >= 0) {
+                    analyzeQuery(url.substring(pos + 1))
+                    urlNoQuery = url.substring(0, pos)
                 }
             }
             return
         }
 
         if (fieldsTxt.contains("=")) {
-            encodedQuery = fieldsTxt
+            encodedQuery = encodeParams(fieldsTxt, charset, true)
             if (!url.contains("?")) url += "?$encodedQuery" else url += "&$encodedQuery"
         }
     }
@@ -221,16 +235,21 @@ class AnalyzeUrl(
                 HttpResponse(url, it, 200)
             }
         }
-        return if (useWebView && method != "POST") {
+        return if (useWebView) {
+            val networkResponse = if (method == "POST") executeNetworkOnce() else null
             BackstageWebView.getSource(
-                html = null,
-                url = url,
+                html = networkResponse?.body,
+                url = networkResponse?.url ?: requestUrl(),
                 js = webJs,
                 headerMap = headerMap,
                 delayTime = webViewDelayTime,
                 timeout = callTimeout ?: 30000
             )
-        } else when (method) {
+        } else executeNetworkOnce()
+    }
+
+    private fun executeNetworkOnce(): HttpResponse {
+        return when (method) {
             "POST" -> {
                 val contentType = headerMap.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value
                 if (!encodedForm.isNullOrBlank()) {
@@ -241,8 +260,16 @@ class AnalyzeUrl(
                     HttpClient.postJson(url, body ?: "", headerMap, charset, proxy, dnsIp, callTimeout)
                 }
             }
-            "HEAD" -> HttpClient.head(url, headerMap, proxy, dnsIp, callTimeout)
-            else -> HttpClient.get(url, headerMap, charset, proxy, dnsIp, callTimeout)
+            "HEAD" -> HttpClient.head(requestUrl(), headerMap, proxy, dnsIp, callTimeout)
+            else -> HttpClient.get(requestUrl(), headerMap, charset, proxy, dnsIp, callTimeout)
+        }
+    }
+
+    private fun requestUrl(): String {
+        return if (!encodedQuery.isNullOrBlank() && urlNoQuery.isNotBlank()) {
+            "$urlNoQuery?$encodedQuery"
+        } else {
+            url
         }
     }
 
@@ -251,15 +278,22 @@ class AnalyzeUrl(
         var body = baseResponse.body
         if (!jsStr.isNullOrBlank()) {
             try {
-                val jsResult = evalJS(jsStr, body)
-                if (jsResult != null && jsResult !is org.mozilla.javascript.Undefined) {
-                    body = jsResult.toString()
-                }
+                return BackstageWebView.getSource(
+                    html = body,
+                    url = baseResponse.url,
+                    js = unwrapJs(jsStr),
+                    headerMap = headerMap,
+                    sourceRegex = sourceRegex,
+                    delayTime = webViewDelayTime,
+                    timeout = callTimeout ?: 30000
+                )
             } catch (_: Exception) {}
         }
         if (!sourceRegex.isNullOrBlank()) {
             body = try {
-                Regex(sourceRegex).find(body)?.value ?: body
+                Regex(sourceRegex).find(body)?.groups?.get(1)?.value
+                    ?: Regex(sourceRegex).find(body)?.value
+                    ?: body
             } catch (_: Exception) { body }
         }
         return HttpResponse(baseResponse.url, body, baseResponse.code, baseResponse.headers)
@@ -375,10 +409,40 @@ class AnalyzeUrl(
         }
     }
     fun encodeParams(params: String, charset: String?, isQuery: Boolean): String {
+        val charsetName = charset?.takeIf { it.isNotBlank() } ?: "UTF-8"
+        val escape = charsetName.equals("escape", true)
+        val segments = params.split("&")
+        return segments.joinToString("&") { part ->
+            val index = part.indexOf("=")
+            if (index < 0) {
+                encodeComponent(part, charsetName, escape, isQuery)
+            } else {
+                val key = part.substring(0, index)
+                val value = part.substring(index + 1)
+                encodeComponent(key, charsetName, escape, isQuery) + "=" + encodeComponent(value, charsetName, escape, isQuery)
+            }
+        }
+    }
+    private fun encodeComponent(value: String, charsetName: String, escape: Boolean, isQuery: Boolean): String {
+        if (value.isEmpty()) return value
+        if (percentEncodedPattern.matcher(value).find() && !value.any { it.code > 127 }) return value
+        if (escape) return jsEscape(value)
         return try {
-            val c = if (charset.isNullOrEmpty()) "UTF-8" else charset
-            URLEncoder.encode(params, c)
-        } catch (_: Exception) { params }
+            val encoded = URLEncoder.encode(value, charsetName)
+            if (isQuery) encoded.replace("+", "%20") else encoded
+        } catch (_: Exception) { value }
+    }
+    private fun jsEscape(value: String): String {
+        val keep = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789*+-./_@"
+        return buildString {
+            value.forEach { ch ->
+                when {
+                    keep.indexOf(ch) >= 0 -> append(ch)
+                    ch.code < 256 -> append('%').append(ch.code.toString(16).uppercase().padStart(2, '0'))
+                    else -> append("%u").append(ch.code.toString(16).uppercase().padStart(4, '0'))
+                }
+            }
+        }
     }
     fun analyzeQuery(query: String) {
         encodedQuery = encodeParams(query, charset, true)
@@ -457,6 +521,9 @@ class AnalyzeUrl(
     }
 
     companion object {
+        private val legacyPagePattern: Pattern = Pattern.compile("<(.*?)>")
+        private val percentEncodedPattern: Pattern = Pattern.compile("%[0-9a-fA-F]{2}")
+
         private fun unwrapJs(jsStr: String): String {
             return when {
                 jsStr.startsWith("@js:", true) -> jsStr.substring(4)

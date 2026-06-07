@@ -69,6 +69,7 @@ class LegadoJsonWebDataSource(
 
     private val bookSources = mutableListOf<BookSource>()
     private val exploreInfoMaps = java.util.concurrent.ConcurrentHashMap<String, ExploreInfoMap>()
+    private val chapterListCache = java.util.concurrent.ConcurrentHashMap<String, List<BookChapter>>()
     private val loginPromptTimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val openEvents = ConcurrentLinkedQueue<OpenEvent>()
     @Volatile
@@ -209,7 +210,7 @@ class LegadoJsonWebDataSource(
                                 for ((index, kind) in effectiveKinds.withIndex()) {
                                     val books = if (index < EXPLORE_PREVIEW_ROW_LIMIT) {
                                         withContext(Dispatchers.IO) {
-                                            WebBook.exploreBookAwait(src, kind.url, 1).take(EXPLORE_PREVIEW_BOOK_LIMIT)
+                                            WebBook.exploreBookAwait(src, kind.url, 1, exploreInfoMap(src)).take(EXPLORE_PREVIEW_BOOK_LIMIT)
                                         }.also { if (it.isEmpty()) promptLoginIfNoAuth(src) }
                                     } else {
                                         emptyList()
@@ -270,7 +271,7 @@ class LegadoJsonWebDataSource(
                                     try {
                                         loading = true
                                         val books = withContext(Dispatchers.IO) {
-                                            WebBook.exploreBookAwait(src, kind.url, requestedPage)
+                                            WebBook.exploreBookAwait(src, kind.url, requestedPage, exploreInfoMap(src))
                                         }
                                         if (books.isEmpty() && requestedPage == 1) promptLoginIfNoAuth(src)
                                         for (book in books) send(SearchResult.MultipleBook(createBookInformation(src, book)))
@@ -646,11 +647,14 @@ class LegadoJsonWebDataSource(
     }
 
     private fun evalExploreJs(source: BookSource, js: String): Any? {
-        val infoMap = exploreInfoMaps.getOrPut(source.bookSourceUrl) { ExploreInfoMap(source.bookSourceUrl) }
         openEvents.clear()
         return source.evalJS(js) { bindings ->
-            bindings["infoMap"] = infoMap
+            bindings["infoMap"] = exploreInfoMap(source)
         }
+    }
+
+    private fun exploreInfoMap(source: BookSource): ExploreInfoMap {
+        return exploreInfoMaps.getOrPut(source.bookSourceUrl) { ExploreInfoMap(source.bookSourceUrl) }
     }
 
     private fun drainOpenExploreKinds(source: BookSource): List<ExploreKind> {
@@ -960,7 +964,10 @@ class LegadoJsonWebDataSource(
                             val newValue = if (enabled) (kind.chars?.getOrNull(1) ?: "true") else (kind.chars?.getOrNull(0) ?: "false")
                             SourceConfig.put(source.bookSourceUrl, kind.title, newValue)
                             source.put(kind.title, newValue)
-                            kind.action?.takeIf { it.isNotBlank() }?.let { runCatching { source.evalJS(it) } }
+                            exploreInfoMap(source)[kind.title] = newValue
+                            kind.action?.takeIf { it.isNotBlank() }?.let { action ->
+                                runCatching { source.evalJS(action) { bindings -> bindings["infoMap"] = exploreInfoMap(source) } }
+                            }
                         }
                     }
                 } as Filter<*>
@@ -980,7 +987,10 @@ class LegadoJsonWebDataSource(
                             addOnChangeListener { selected ->
                                 SourceConfig.put(source.bookSourceUrl, kind.title, selected)
                                 source.put(kind.title, selected)
-                                kind.action?.takeIf { it.isNotBlank() }?.let { runCatching { source.evalJS(it) } }
+                                exploreInfoMap(source)[kind.title] = selected
+                                kind.action?.takeIf { it.isNotBlank() }?.let { action ->
+                                    runCatching { source.evalJS(action) { bindings -> bindings["infoMap"] = exploreInfoMap(source) } }
+                                }
                             }
                         } as Filter<*>
                     }
@@ -1155,6 +1165,7 @@ class LegadoJsonWebDataSource(
 
     fun clearSourceRuntimeCache(source: BookSource) {
         val key = source.bookSourceUrl
+        chapterListCache.keys.removeIf { it.startsWith("$key$SEPARATOR") }
         CacheManager.delete("infoMap_$key")
         CacheManager.delete("userInfo_$key")
         CacheManager.delete("loginHeader_$key")
@@ -1196,10 +1207,8 @@ class LegadoJsonWebDataSource(
         val source = getSource(sourceUrl) ?: return@withContext BookVolumes.empty(id)
         try {
             val book = Book(bookUrl = bookUrl, origin = sourceUrl, originName = source.bookSourceName)
-            WebBook.getBookInfoAwait(source, book)
-            val chapters = WebBook.getChapterListAwait(source, book)
-            val chapterInfos = chapters.map { ch -> ChapterInformation(makeId(sourceUrl, ch.url), ch.title) }
-            BookVolumes(id, listOf(Volume("::vol0", "目录", chapterInfos)))
+            val chapters = loadChapters(source, book, sourceUrl)
+            BookVolumes(id, chaptersToVolumes(sourceUrl, chapters))
         } catch (_: Exception) { BookVolumes.empty(id) }
     }
 
@@ -1213,30 +1222,54 @@ class LegadoJsonWebDataSource(
                 currentImageHeader = source.getHeaderMap(true)
                 val (_, bookUrl) = parseId(bookId)
                 val book = Book(bookUrl = bookUrl, origin = sourceUrl, originName = source.bookSourceName)
-                val bookChapter = BookChapter(bookUrl = bookUrl, url = chapterUrl, title = "", index = 0)
-                val rawContent = WebBook.getContentAwait(source, book, bookChapter)
+                val chapters = loadChapters(source, book, sourceUrl).filter { !it.isVolume && it.url.isNotBlank() }
+                val chapterIndex = chapters.indexOfFirst { it.url == chapterUrl }
+                val bookChapter = chapters.getOrNull(chapterIndex)?.copy()
+                    ?: BookChapter(bookUrl = bookUrl, url = chapterUrl, title = "", index = 0, baseUrl = book.tocUrl.ifBlank { book.bookUrl })
+                val nextChapterUrl = if (chapterIndex >= 0) chapters.getOrNull(chapterIndex + 1)?.url else null
+                val lastChapter = if (chapterIndex > 0) chapters.getOrNull(chapterIndex - 1)?.url?.let { makeId(sourceUrl, it) }.orEmpty() else ""
+                val nextChapter = if (chapterIndex >= 0) nextChapterUrl?.let { makeId(sourceUrl, it) }.orEmpty() else ""
+                val rawContent = WebBook.getContentAwait(source, book, bookChapter, nextChapterUrl)
                 val chTitle = bookChapter.title.ifBlank { "" }
                 val contentJson = buildLnrContentJson(rawContent, chapterUrl)
-                val (lastChapter, nextChapter) = findChapterNeighbors(source, book, sourceUrl, chapterUrl)
                 MutableChapterContent(chapterId, chTitle, contentJson, lastChapter, nextChapter)
             } catch (_: Exception) { ChapterContent.empty(chapterId) }
         }
 
-    private fun findChapterNeighbors(
+    private fun loadChapters(
         source: BookSource,
         book: Book,
-        sourceUrl: String,
-        chapterUrl: String
-    ): Pair<String, String> {
-        return runCatching {
-            val chapters = WebBook.getChapterListAwait(source, book)
-                .filter { !it.isVolume && it.url.isNotBlank() }
-            val index = chapters.indexOfFirst { it.url == chapterUrl }
-            if (index < 0) return@runCatching "" to ""
-            val previous = chapters.getOrNull(index - 1)?.url?.let { makeId(sourceUrl, it) }.orEmpty()
-            val next = chapters.getOrNull(index + 1)?.url?.let { makeId(sourceUrl, it) }.orEmpty()
-            previous to next
-        }.getOrDefault("" to "")
+        sourceUrl: String
+    ): List<BookChapter> {
+        WebBook.getBookInfoAwait(source, book)
+        val key = makeId(sourceUrl, book.bookUrl)
+        return chapterListCache.getOrPut(key) { WebBook.getChapterListAwait(source, book) }
+    }
+
+    private fun chaptersToVolumes(sourceUrl: String, chapters: List<BookChapter>): List<Volume> {
+        val volumes = mutableListOf<Volume>()
+        var volumeIndex = 0
+        var currentTitle = "目录"
+        var currentChapters = mutableListOf<ChapterInformation>()
+
+        fun flush() {
+            if (currentChapters.isEmpty()) return
+            volumes.add(Volume("::vol${volumeIndex++}", currentTitle, currentChapters))
+            currentChapters = mutableListOf()
+        }
+
+        chapters.forEach { chapter ->
+            if (chapter.isVolume) {
+                flush()
+                currentTitle = chapter.title.ifBlank { "目录" }
+            } else if (chapter.url.isNotBlank()) {
+                currentChapters.add(ChapterInformation(makeId(sourceUrl, chapter.url), chapter.title))
+            }
+        }
+        flush()
+        return volumes.ifEmpty {
+            listOf(Volume("::vol0", "目录", chapters.filter { !it.isVolume }.map { ChapterInformation(makeId(sourceUrl, it.url), it.title) }))
+        }
     }
 
     /**
