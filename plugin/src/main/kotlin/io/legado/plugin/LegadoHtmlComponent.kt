@@ -2,13 +2,22 @@ package io.legado.plugin
 
 import android.content.Context
 import android.graphics.Color
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import io.legado.engine.http.CookieStore
 import io.nightfish.lightnovelreader.api.content.component.AbstractContentComponent
 import io.nightfish.lightnovelreader.api.content.component.AbstractContentComponentData
 import io.nightfish.lightnovelreader.api.content.component.ComponentDataJsonElementSerializer
@@ -23,7 +32,10 @@ import org.dom4j.Element
 @Serializable
 data class LegadoHtmlComponentData(
     val html: String,
-    val baseUrl: String = ""
+    val baseUrl: String = "",
+    val sourceUrl: String = "",
+    val sourceJson: String = "",
+    val jsLib: String = ""
 ) : AbstractContentComponentData() {
     override val id: String = ID
 
@@ -54,10 +66,26 @@ class LegadoHtmlComponent(
 
     @Composable
     override fun Content(modifier: Modifier) {
+        val source = remember(data.sourceJson) { parseLegadoHtmlSource(data.sourceJson) }
+        val sourceUrl = data.sourceUrl.ifBlank { source?.bookSourceUrl ?: data.baseUrl }
+        val bridge = remember(sourceUrl, source) {
+            LegadoWebBridge(LoginJsBridge(null, sourceUrl, bookSource = source))
+        }
+        val cacheBridge = remember { LegadoCacheWebBridge() }
+        val html = remember(data.html, data.jsLib, sourceUrl, data.baseUrl) {
+            injectLegadoWebBootstrap(data.html, data.jsLib, sourceUrl, data.baseUrl)
+        }
+        var webViewRef by remember { mutableStateOf<WebView?>(null) }
+        DisposableEffect(Unit) {
+            onDispose {
+                webViewRef?.destroy()
+                webViewRef = null
+            }
+        }
         AndroidView(
             modifier = modifier
                 .fillMaxWidth()
-                .heightIn(min = 120.dp, max = 640.dp),
+                .heightIn(min = 120.dp, max = 1200.dp),
             factory = {
                 WebView(context).apply {
                     setBackgroundColor(Color.TRANSPARENT)
@@ -65,14 +93,34 @@ class LegadoHtmlComponent(
                     settings.domStorageEnabled = true
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
-                    loadHtml()
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    addJavascriptInterface(bridge, "java")
+                    addJavascriptInterface(bridge, "source")
+                    addJavascriptInterface(cacheBridge, "cache")
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            syncCookie(url ?: data.baseUrl)
+                        }
+
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
+                    }
+                    webViewRef = this
+                    loadHtml(html)
                 }
             },
-            update = { webView -> webView.loadHtml() }
+            update = { webView -> webView.loadHtml(html) }
         )
     }
 
-    private fun WebView.loadHtml() {
-        loadDataWithBaseURL(data.baseUrl.ifBlank { null }, data.html, "text/html", "UTF-8", null)
+    private fun WebView.loadHtml(html: String) {
+        loadDataWithBaseURL(data.baseUrl.ifBlank { null }, html, "text/html", "UTF-8", null)
+    }
+
+    private fun syncCookie(url: String) {
+        if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) return
+        val cookie = CookieManager.getInstance().getCookie(url) ?: return
+        CookieStore.setCookieFromUrl(url, cookie)
     }
 }

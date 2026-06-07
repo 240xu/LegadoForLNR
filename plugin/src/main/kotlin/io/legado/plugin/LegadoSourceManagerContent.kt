@@ -82,13 +82,14 @@ private val defaultLoginUiFlexStyle = LoginUiFlexStyle()
 fun LegadoSourceManagerContent(
     hostContext: Context,
     paddingValues: PaddingValues,
-    activeDataSourceId: Int? = null
+    activeDataSourceId: Int? = null,
+    providedDataSource: LegadoJsonWebDataSource? = null
 ) {
     val composeContext = LocalContext.current
     val appContext = remember(hostContext, composeContext) {
         (composeContext.applicationContext ?: hostContext.applicationContext ?: hostContext)
     }
-    val dataSource = remember(appContext) { LegadoJsonWebDataSource(appContext) }
+    val dataSource = remember(appContext, providedDataSource) { providedDataSource ?: LegadoJsonWebDataSource(appContext) }
     val isActiveDataSource = activeDataSourceId == null || activeDataSourceId == dataSource.id
     var sources by remember { mutableStateOf(emptyList<BookSource>()) }
     var statusText by remember { mutableStateOf("") }
@@ -692,6 +693,10 @@ private fun LegadoWebLoginPanel(
     onStatus: (String) -> Unit
 ) {
     val loginUrl = remember(source) { resolveLoginUrl(source) }
+    val webBridge = remember(source, activity) {
+        LegadoWebBridge(LoginJsBridge(activity, source.bookSourceUrl, bookSource = source))
+    }
+    val cacheBridge = remember { LegadoCacheWebBridge() }
     AndroidView(
         modifier = Modifier
             .fillMaxWidth()
@@ -703,12 +708,18 @@ private fun LegadoWebLoginPanel(
                 settings.userAgentString = io.legado.engine.constant.AppConst.USER_AGENT
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                addJavascriptInterface(LoginJsBridge(activity, source.bookSourceUrl, bookSource = source), "java")
+                addJavascriptInterface(webBridge, "java")
+                addJavascriptInterface(webBridge, "source")
+                addJavascriptInterface(cacheBridge, "cache")
                 webChromeClient = WebChromeClient()
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         syncWebViewCookie(url ?: loginUrl)
+                        view?.evaluateJavascript(
+                            legadoWebBootstrapScript(source.jsLib, source.bookSourceUrl, url ?: loginUrl),
+                            null
+                        )
                         onStatus("页面已加载，Cookie 已同步")
                     }
 
@@ -717,7 +728,8 @@ private fun LegadoWebLoginPanel(
                 if (loginUrl.startsWith("http://") || loginUrl.startsWith("https://")) {
                     loadUrl(loginUrl)
                 } else {
-                    loadDataWithBaseURL(source.bookSourceUrl, loginUrl, "text/html", "UTF-8", null)
+                    val html = injectLegadoWebBootstrap(loginUrl, source.jsLib, source.bookSourceUrl, source.bookSourceUrl)
+                    loadDataWithBaseURL(source.bookSourceUrl, html, "text/html", "UTF-8", null)
                 }
             }
         }

@@ -177,6 +177,7 @@ class LegadoJsonWebDataSource(
 
         override fun search(searchType: SearchType, keyword: String): Flow<SearchResult> = flow {
             val emitted = linkedSetOf<String>()
+            val errors = mutableListOf<String>()
             for (source in getEnabledSources()) {
                 try {
                     val maxPage = if (source.searchUrl?.containsPagePlaceholder() == true) SEARCH_PAGE_LIMIT else 1
@@ -188,7 +189,14 @@ class LegadoJsonWebDataSource(
                             if (emitted.add(info.id)) emit(SearchResult.MultipleBook(info))
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    val sourceName = source.bookSourceName.ifBlank { source.bookSourceUrl }
+                    errors.add("$sourceName: ${e.message ?: e::class.java.simpleName}")
+                    android.util.Log.w("LegadoDS", "search failed: $sourceName", e)
+                }
+            }
+            if (emitted.isEmpty() && errors.isNotEmpty()) {
+                emit(SearchResult.Error(errors.joinToString("\n")))
             }
             emit(SearchResult.End())
         }
@@ -287,10 +295,15 @@ class LegadoJsonWebDataSource(
                                             ended = true
                                             send(SearchResult.Empty())
                                         }
-                                    } catch (_: Exception) {
+                                    } catch (e: Exception) {
                                         promptLoginIfNoAuth(src)
                                         ended = requestedPage > 1
-                                        send(SearchResult.Empty())
+                                        if (requestedPage == 1) {
+                                            val sourceName = src.bookSourceName.ifBlank { src.bookSourceUrl }
+                                            send(SearchResult.Error("$sourceName: ${e.message ?: e::class.java.simpleName}"))
+                                        } else {
+                                            send(SearchResult.Empty())
+                                        }
                                     } finally {
                                         loading = false
                                     }
@@ -337,6 +350,7 @@ class LegadoJsonWebDataSource(
             if (src.bookSourceUrl.isNotBlank()) {
                 bookSources.removeAll { it.bookSourceUrl == src.bookSourceUrl }
                 bookSources.add(src); count++
+                invalidateSourceRuntime(src.bookSourceUrl)
             }
         }
         saveSources()
@@ -369,14 +383,24 @@ class LegadoJsonWebDataSource(
     fun setSourceEnabled(sourceUrl: String, enabled: Boolean): Boolean {
         val source = getSource(sourceUrl) ?: return false
         source.enabled = enabled
+        invalidateSourceRuntime(sourceUrl)
         saveSources()
         return true
     }
 
     fun deleteSource(sourceUrl: String): Boolean {
         val removed = bookSources.removeAll { it.bookSourceUrl == sourceUrl }
-        if (removed) saveSources()
+        if (removed) {
+            clearSourceRuntimeCache(sourceUrl)
+            saveSources()
+        }
         return removed
+    }
+
+    private fun invalidateSourceRuntime(sourceUrl: String) {
+        chapterListCache.keys.removeIf { it.startsWith("$sourceUrl$SEPARATOR") }
+        exploreInfoMaps.remove(sourceUrl)
+        loginPromptTimes.remove(sourceUrl)
     }
 
     private fun loadSources() {
@@ -1113,15 +1137,15 @@ class LegadoJsonWebDataSource(
         book: Book? = null,
         isCover: Boolean = false
     ): Uri {
-        val clean = cleanImageUrl(raw, baseUrl)
-        val uri = source?.let { decodeImageUri(clean, it, book, isCover) } ?: clean
+        val value = raw?.trim().orEmpty()
+        val clean = cleanImageUrl(value, baseUrl)
+        val uri = source?.let { decodeImageUri(clean, it, book, isCover, extractImageHeaders(value)) } ?: clean
         return try { Uri.parse(uri) } catch (_: Exception) { Uri.EMPTY }
     }
 
     private fun cleanImageUrl(raw: String?, baseUrl: String): String {
         val value = raw?.trim().orEmpty()
         if (value.isBlank()) return ""
-        rememberImageHeaders(value)
         // Legado 图片格式: url,{"click":"...","style":"TEXT","width":"50%"}
         // 剥离尾部 JSON 参数，只保留纯 URL
         val stripped = stripLegadoImageParams(value).let { UrlOptionParser.strip(it) }
@@ -1140,7 +1164,7 @@ class LegadoJsonWebDataSource(
         isCover: Boolean = false
     ): String {
         val clean = cleanImageUrl(raw, baseUrl)
-        return source?.let { decodeImageUri(clean, it, book, isCover) } ?: clean
+        return source?.let { decodeImageUri(clean, it, book, isCover, extractImageHeaders(raw)) } ?: clean
     }
 
     /**
@@ -1165,14 +1189,14 @@ class LegadoJsonWebDataSource(
         return match?.groupValues?.getOrNull(1)
     }
 
-    private fun rememberImageHeaders(raw: String) {
-        val params = extractLegadoImageParams(raw) ?: return
+    private fun extractImageHeaders(raw: String): Map<String, String> {
+        val params = extractLegadoImageParams(raw) ?: return emptyMap()
         val headersElement = parseJsonLenient(params)
             ?.takeIf { it.isJsonObject }
             ?.asJsonObject
             ?.get("headers")
-            ?: return
-        val headers = when {
+            ?: return emptyMap()
+        return when {
             headersElement.isJsonObject -> headersElement.asJsonObject.entrySet().mapNotNull { (key, value) ->
                 val headerValue = jsonScalarString(value)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 key to headerValue
@@ -1180,21 +1204,20 @@ class LegadoJsonWebDataSource(
             headersElement.isJsonPrimitive -> UrlOptionParser.parseHeaderLines(headersElement.asString)
             else -> emptyMap()
         }
-        if (headers.isNotEmpty()) {
-            currentImageHeader = currentImageHeader + headers
-        }
     }
 
     private fun decodeImageUri(
         cleanUrl: String,
         source: BookSource,
         book: Book?,
-        isCover: Boolean
+        isCover: Boolean,
+        extraHeaders: Map<String, String> = emptyMap()
     ): String? {
         if (cleanUrl.isBlank()) return null
         val ruleJs = if (isCover) source.coverDecodeJs else source.getContentRule().imageDecode
-        if (ruleJs.isNullOrBlank()) return null
-        val originalBytes = readImageBytes(cleanUrl, source)?.takeIf { it.isNotEmpty() } ?: return null
+        if (ruleJs.isNullOrBlank() && extraHeaders.isEmpty()) return null
+        val originalBytes = readImageBytes(cleanUrl, source, extraHeaders)?.takeIf { it.isNotEmpty() } ?: return null
+        if (ruleJs.isNullOrBlank()) return imageDataUri(cleanUrl, originalBytes)
         val result = runCatching {
             source.evalJS(unwrapJsBlock(ruleJs)) { bindings ->
                 bindings["book"] = book
@@ -1205,7 +1228,7 @@ class LegadoJsonWebDataSource(
         return decodedImageResultToUri(result, cleanUrl, originalBytes)
     }
 
-    private fun readImageBytes(cleanUrl: String, source: BookSource): ByteArray? {
+    private fun readImageBytes(cleanUrl: String, source: BookSource, extraHeaders: Map<String, String>): ByteArray? {
         return when {
             cleanUrl.startsWith("data:", true) -> dataUriToBytes(cleanUrl)
             cleanUrl.startsWith("content://", true) -> runCatching {
@@ -1215,7 +1238,7 @@ class LegadoJsonWebDataSource(
                 File(Uri.parse(cleanUrl).path.orEmpty()).readBytes()
             }.getOrNull()
             cleanUrl.startsWith("http://", true) || cleanUrl.startsWith("https://", true) -> runCatching {
-                val headers = source.getHeaderMap(true).toMutableMap().apply { putAll(currentImageHeader) }
+                val headers = source.getHeaderMap(true).toMutableMap().apply { putAll(extraHeaders) }
                 HttpClient.getByteArray(cleanUrl, headers = headers, timeoutMillis = source.respondTime)
             }.getOrNull()
             else -> null
@@ -1405,13 +1428,17 @@ class LegadoJsonWebDataSource(
     }
 
     fun logout(source: BookSource) {
-        val domain = try { URL(source.bookSourceUrl).host } catch (_: Exception) { return }
-        io.legado.engine.http.CookieStore.clear(domain)
+        runCatching { URL(source.bookSourceUrl).host }.getOrNull()?.let(CookieStore::clear)
+        clearSourceRuntimeCache(source.bookSourceUrl)
     }
 
     fun clearSourceRuntimeCache(source: BookSource) {
-        val key = source.bookSourceUrl
-        chapterListCache.keys.removeIf { it.startsWith("$key$SEPARATOR") }
+        clearSourceRuntimeCache(source.bookSourceUrl)
+    }
+
+    fun clearSourceRuntimeCache(sourceUrl: String) {
+        invalidateSourceRuntime(sourceUrl)
+        val key = sourceUrl
         CacheManager.delete("infoMap_$key")
         CacheManager.delete("userInfo_$key")
         CacheManager.delete("loginHeader_$key")
@@ -1548,7 +1575,7 @@ class LegadoJsonWebDataSource(
             val body = match.groupValues[2]
             when (tag) {
                 "usehtml" -> addHtmlContent(body, baseUrl, source, book)
-                "useweb" -> addLegadoHtmlComponent(body, baseUrl)
+                "useweb" -> addLegadoHtmlComponent(body, baseUrl, source)
                 "md" -> addMarkdownContent(body, baseUrl, source, book)
             }
             lastEnd = match.range.last + 1
@@ -1621,13 +1648,16 @@ class LegadoJsonWebDataSource(
         flushText()
     }
 
-    private fun JsonArrayBuilder.addLegadoHtmlComponent(html: String, baseUrl: String) {
+    private fun JsonArrayBuilder.addLegadoHtmlComponent(html: String, baseUrl: String, source: BookSource) {
         if (html.isBlank()) return
         add(buildJsonObject {
             put("id", LegadoHtmlComponentData.ID)
             put("data", buildJsonObject {
                 put("html", html)
                 put("baseUrl", baseUrl)
+                put("sourceUrl", source.bookSourceUrl)
+                put("sourceJson", gson.toJson(source))
+                put("jsLib", resolveLegadoWebJsLib(source))
             })
         })
     }

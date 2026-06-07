@@ -365,17 +365,26 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             settings.javaScriptEnabled = true; settings.domStorageEnabled = true
             settings.userAgentString = io.legado.engine.constant.AppConst.USER_AGENT
-            addJavascriptInterface(loginJsBridge!!, "java")
+            val webBridge = LegadoWebBridge(loginJsBridge!!)
+            val cacheBridge = LegadoCacheWebBridge()
+            addJavascriptInterface(webBridge, "java")
+            addJavascriptInterface(webBridge, "source")
+            addJavascriptInterface(cacheBridge, "cache")
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    try { view?.evaluateJavascript("if(typeof java==='undefined'){window.java={};}", null) } catch (_: Exception) {}
+                    try { view?.evaluateJavascript(legadoWebBootstrapScript(source.jsLib, source.bookSourceUrl, url ?: actualUrl), null) } catch (_: Exception) {}
                     url?.let { val c = CookieManager.getInstance().getCookie(it); if (!c.isNullOrBlank()) CookieStore.setCookie(source.bookSourceUrl, c) }
                 }
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
             }
             webChromeClient = WebChromeClient()
-            if (actualUrl.startsWith("http://") || actualUrl.startsWith("https://")) loadUrl(actualUrl) else loadData(actualUrl, "text/html", "UTF-8")
+            if (actualUrl.startsWith("http://") || actualUrl.startsWith("https://")) {
+                loadUrl(actualUrl)
+            } else {
+                val html = injectLegadoWebBootstrap(actualUrl, source.jsLib, source.bookSourceUrl, source.bookSourceUrl)
+                loadDataWithBaseURL(source.bookSourceUrl, html, "text/html", "UTF-8", null)
+            }
         }
         webviewContainer.addView(webView)
     }

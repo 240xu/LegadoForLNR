@@ -10,8 +10,8 @@ import io.nightfish.lightnovelreader.api.web.WebBookDataSourceManagerApi
 
 @Plugin(
     name = "Legado JSON 书源",
-    version = 14,
-    versionName = "1.3.8",
+    version = 15,
+    versionName = "1.3.9",
     author = "LNR Legado Plugin",
     description = "支持导入 lyc486 版 Legado JSON 书源，增强 loginUi、发现页、旧字段迁移和宿主 PageContent 管理。",
     updateUrl = "",
@@ -41,10 +41,12 @@ class LegadoJsonPlugin(
 
     @Composable
     override fun PageContent(paddingValues: PaddingValues) {
+        val activeDataSource = webBookDataSourceManagerApi.getWebDataSource()
         LegadoSourceManagerContent(
             hostContext = context,
             paddingValues = paddingValues,
-            activeDataSourceId = webBookDataSourceManagerApi.getWebDataSource().id
+            activeDataSourceId = activeDataSource.id,
+            providedDataSource = activeDataSource as? LegadoJsonWebDataSource
         )
     }
 }

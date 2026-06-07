@@ -17,8 +17,8 @@ android {
         applicationId = "io.legado.plugin"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 15
+        versionName = "1.3.9"
     }
     buildFeatures {
         compose = true
@@ -116,7 +116,7 @@ fun pluginApk(): File =
     File(layout.buildDirectory.asFile.get(), "outputs/apk/debug")
         .walkTopDown()
         .first {
-            it.isFile && it.name.endsWith(".apk") || it.name.endsWith(".lnrp")
+            it.isFile && (it.name.endsWith(".apk") || it.name.endsWith(".lnrp"))
         }
 
 fun installPluginTask(name: String, hostPkg: String) {

@@ -21,6 +21,7 @@ import io.legado.engine.http.HttpResponse
 import io.legado.engine.http.StrResponse
 import io.legado.engine.model.RowUi
 import io.legado.engine.js.JsExtensions
+import io.legado.engine.js.SourceOpenCallback
 import io.legado.engine.rule.AnalyzeUrl
 import io.legado.engine.rule.UrlOptionParser
 import io.legado.engine.shim.CacheManager
@@ -292,6 +293,7 @@ class LoginJsBridge(
 
     fun open(type: String, url: String, title: String) {
         Debug.log("LoginJsBridge.open($type, $url, $title)")
+        SourceOpenCallback.onOpen(type, url, title)
     }
 
     // ==================== 字符串工具 ====================
