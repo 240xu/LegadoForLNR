@@ -182,13 +182,18 @@ class AnalyzeRule(
         val c = mContent ?: this.content ?: return ""
         if (ruleList.isEmpty()) return ""
         result = c
-        if (ruleList.size == 1) {
-            val single = ruleList.first()
-            val direct = getDirectValue(result, single.rule)
-            if (direct != null) {
-                return replaceRegex(direct, single)
-            }
-        }
+        if (result is NativeObject) {
+            val sourceRule = ruleList.first()
+            putRule(sourceRule.putMap)
+            sourceRule.makeUpRule(this, result)
+            result = if (sourceRule.getParamSize() > 1) {
+                sourceRule.rule
+            } else {
+                (result as NativeObject)[sourceRule.rule]?.toString()
+            }?.let { replaceRegex(it, sourceRule) }
+        } else if (result is com.google.gson.internal.LinkedTreeMap<*, *>) {
+            result = (result as Map<*, *>)[ruleList.first().rule]?.toString()
+        } else {
         for (sr in ruleList) {
             putRule(sr.putMap); sr.makeUpRule(this, result); result ?: continue
             val r = sr.rule
@@ -204,6 +209,7 @@ class AnalyzeRule(
             }
             if (sr.replaceRegex.isNotEmpty()) { result = replaceRegex(result.toString(), sr) }
         }
+        } // end else (not NativeObject/LinkedTreeMap)
         if (result == null) return ""
         val str = result.toString()
         if (isUrl && str.isNotBlank()) { return AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), str) }
@@ -449,8 +455,15 @@ class AnalyzeRule(
                 val param = ruleParam[i]
                 when {
                     type > 0 -> {
-                        // Regex capture group replacement
-                        sb.append(type)
+                        // Regex capture group: extract group[type] from result
+                        @Suppress("UNCHECKED_CAST")
+                        val groups = currentResult as? List<String?>
+                        val captured = groups?.getOrNull(type)
+                        if (captured != null) {
+                            sb.append(captured)
+                        } else {
+                            sb.append(param)
+                        }
                     }
                     type == -1 -> {
                         // JS expression or sub-rule in {{...}}
