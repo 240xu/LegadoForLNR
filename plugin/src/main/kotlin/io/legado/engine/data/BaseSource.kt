@@ -86,10 +86,20 @@ interface BaseSource : JsExtensions {
     }
     fun removeLoginHeader() { CacheManager.delete("loginHeader_" + getKey()); CookieStore.removeCookie(getKey()) }
 
+    /**
+     * 对齐 lyc486: AES 解密读取登录信息
+     */
     fun getLoginInfo(): String? {
         return try {
             val cache = CacheManager.get("userInfo_" + getKey()) ?: return null
-            try { String(java.util.Base64.getDecoder().decode(cache)) } catch (_: Exception) { cache }
+            try {
+                val key = io.legado.engine.constant.AppConst.androidId.encodeToByteArray().copyOf(16)
+                val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
+                cipher.init(javax.crypto.Cipher.DECRYPT_MODE, javax.crypto.spec.SecretKeySpec(key, "AES"))
+                String(cipher.doFinal(java.util.Base64.getDecoder().decode(cache)))
+            } catch (_: Exception) {
+                try { String(java.util.Base64.getDecoder().decode(cache)) } catch (_: Exception) { cache }
+            }
         } catch (_: Exception) { null }
     }
     fun getLoginInfoMap(): MutableMap<String, String> {
@@ -133,12 +143,24 @@ interface BaseSource : JsExtensions {
             null
         }
     }
+    /**
+     * 对齐 lyc486: 使用 AES 加密存储登录信息
+     */
     fun putLoginInfo(info: String): Boolean {
         return try {
-            val encoded = java.util.Base64.getEncoder().encodeToString(info.toByteArray())
+            val key = io.legado.engine.constant.AppConst.androidId.encodeToByteArray().copyOf(16)
+            val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, javax.crypto.spec.SecretKeySpec(key, "AES"))
+            val encoded = java.util.Base64.getEncoder().encodeToString(cipher.doFinal(info.toByteArray()))
             CacheManager.put("userInfo_" + getKey(), encoded)
             true
-        } catch (_: Exception) { false }
+        } catch (_: Exception) {
+            try {
+                val encoded = java.util.Base64.getEncoder().encodeToString(info.toByteArray())
+                CacheManager.put("userInfo_" + getKey(), encoded)
+                true
+            } catch (_: Exception) { false }
+        }
     }
     fun removeLoginInfo() { CacheManager.delete("userInfo_" + getKey()) }
 
