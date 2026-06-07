@@ -1,0 +1,10 @@
+﻿<resources>
+    <string name="app_name">Legado JSON 书源</string>
+    <string name="login_title">书源登录</string>
+    <string name="login_success">登录成功</string>
+    <string name="login_failed">登录失败</string>
+    <string name="login_checking">正在检查登录状态...</string>
+    <string name="login_not_configured">该书源未配置登录</string>
+    <string name="login_parse_error">loginUi 解析失败，切换到 WebView 模式</string>
+    <string name="back">返回</string>
+</resources>
