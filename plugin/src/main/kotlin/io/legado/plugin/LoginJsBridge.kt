@@ -336,6 +336,99 @@ class LoginJsBridge(
     fun hexEncode(str: String): String = str.toByteArray().joinToString("") { "%02x".format(it) }
     fun hexDecode(hex: String): String = try { String(hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()) } catch (_: Exception) { hex }
     fun hexDecodeToString(hex: Any?): String = hexDecode(hex?.toString() ?: "")
+    // === Crypto methods (aligned with JsEncodeUtils) ===
+    fun md5Encode(str: String): String = md5(str)
+    fun md5Encode16(str: String): String = md5(str).substring(8, 24)
+    fun digestHex(data: String, algorithm: String): String {
+        return java.security.MessageDigest.getInstance(algorithm).digest(data.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+    fun digestBase64Str(data: String, algorithm: String): String {
+        return java.util.Base64.getEncoder().encodeToString(java.security.MessageDigest.getInstance(algorithm).digest(data.toByteArray()))
+    }
+    fun HMacHex(data: String, algorithm: String, key: String): String {
+        val mac = javax.crypto.Mac.getInstance(algorithm)
+        mac.init(javax.crypto.spec.SecretKeySpec(key.toByteArray(), algorithm))
+        return mac.doFinal(data.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+    fun HMacBase64(data: String, algorithm: String, key: String): String {
+        val mac = javax.crypto.Mac.getInstance(algorithm)
+        mac.init(javax.crypto.spec.SecretKeySpec(key.toByteArray(), algorithm))
+        return java.util.Base64.getEncoder().encodeToString(mac.doFinal(data.toByteArray()))
+    }
+    fun aesEncode(key: String, data: String): String {
+        val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, javax.crypto.spec.SecretKeySpec(key.toByteArray().copyOf(16), "AES"))
+        return java.util.Base64.getEncoder().encodeToString(cipher.doFinal(data.toByteArray()))
+    }
+    fun aesDecode(key: String, data: String): String {
+        val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
+        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, javax.crypto.spec.SecretKeySpec(key.toByteArray().copyOf(16), "AES"))
+        return String(cipher.doFinal(java.util.Base64.getDecoder().decode(data)))
+    }
+    fun aesDecodeToString(str: String, key: String, transformation: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance(transformation)
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), transformation.split("/")[0])
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec)
+            String(cipher.doFinal(java.util.Base64.getDecoder().decode(str)))
+        } catch (_: Exception) { null }
+    }
+    fun aesEncodeToString(str: String, key: String, transformation: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance(transformation)
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), transformation.split("/")[0])
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+            java.util.Base64.getEncoder().encodeToString(cipher.doFinal(str.toByteArray()))
+        } catch (_: Exception) { null }
+    }
+    fun tripleDESDecodeStr(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance("DESede/$mode/$padding")
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), "DESede")
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec)
+            String(cipher.doFinal(java.util.Base64.getDecoder().decode(data)))
+        } catch (_: Exception) { null }
+    }
+    fun tripleDESEncodeBase64Str(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance("DESede/$mode/$padding")
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), "DESede")
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+            java.util.Base64.getEncoder().encodeToString(cipher.doFinal(data.toByteArray()))
+        } catch (_: Exception) { null }
+    }
+    fun desDecodeToString(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance("DES/$mode/$padding")
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), "DES")
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec)
+            String(cipher.doFinal(java.util.Base64.getDecoder().decode(data)))
+        } catch (_: Exception) { null }
+    }
+    fun desEncodeToString(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance("DES/$mode/$padding")
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), "DES")
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+            java.util.Base64.getEncoder().encodeToString(cipher.doFinal(data.toByteArray()))
+        } catch (_: Exception) { null }
+    }
+    fun encodeURIComponent(str: String): String = java.net.URLEncoder.encode(str, "UTF-8").replace("+", "%20").replace("%21", "!").replace("%27", "'").replace("%28", "(").replace("%29", ")").replace("%7E", "~")
+    fun decodeURIComponent(str: String): String = java.net.URLDecoder.decode(str, "UTF-8")
+    fun isAbsUrl(url: String): Boolean = url.startsWith("http://") || url.startsWith("https://")
+    fun isJson(str: String): Boolean = str.trim().let { (it.startsWith("{") && it.endsWith("}")) || (it.startsWith("[") && it.endsWith("]")) }
+    fun htmlFormat(str: String): String = str
+    fun str(obj: Any?): String = obj?.toString() ?: ""
+    fun timeFormat(time: Long): String = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(time))
+    fun timeFormat(pattern: String): String = java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).format(java.util.Date())
+    fun currentTimeMillis(): Long = System.currentTimeMillis()
+
 
     /** 获取登录数据 (对应 Legado 中的 result 变量) */
     @android.webkit.JavascriptInterface
