@@ -100,6 +100,7 @@ dependencies {
     implementation("com.jayway.jsonpath:json-path:2.10.0")
     implementation("cn.wanghaomiao:JsoupXpath:2.5.3")
     implementation("cn.hutool:hutool-crypto:5.8.22")
+    implementation("org.dom4j:dom4j:2.2.0")
     implementation(libs.jsoup)
 
     //LNR Api

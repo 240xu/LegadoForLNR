@@ -14,19 +14,26 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenuItem
@@ -36,6 +43,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,14 +65,18 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import io.legado.engine.data.BookSource
 import io.legado.engine.http.CookieStore
+import io.legado.engine.js.SharedJsScope
 import io.legado.engine.model.RowUi
 import io.legado.engine.rule.UrlOptionParser
 import io.legado.engine.shim.AndroidContext
 import io.legado.engine.shim.CacheManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.mozilla.javascript.Context as RhinoContext
 import org.mozilla.javascript.ScriptableObject
 
 private val managerGson = Gson()
+private val defaultLoginUiFlexStyle = LoginUiFlexStyle()
 
 @Composable
 fun LegadoSourceManagerContent(
@@ -352,6 +364,7 @@ private fun PasteImportDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LegadoLoginDialog(
     source: BookSource,
@@ -360,21 +373,41 @@ private fun LegadoLoginDialog(
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
-    val resolvedLoginUi = remember(source) { resolveLoginUiJson(source) }
+    var resolvedLoginUi by remember(source) { mutableStateOf(resolveLoginUiJson(source)) }
     val rows = remember(source, resolvedLoginUi) { parseLoginRows(resolvedLoginUi) }
+    val rowLabels = remember(source, rows) { mutableStateMapOf<String, String>() }
     var formData by remember(source) { mutableStateOf(source.getLoginInfoMap().toMutableMap()) }
     var message by remember { mutableStateOf("") }
 
     fun updateData(data: Map<String, Any?>?) {
-        if (data == null) return
-        formData = formData.toMutableMap().apply {
-            data.forEach { (key, value) ->
-                if (key.isNotBlank()) put(key, value?.toString().orEmpty())
+        formData = if (data == null) {
+            rows
+                .filter { it.type != RowUi.Type.button && it.name.isNotBlank() }
+                .associate { it.name to it.default.orEmpty() }
+                .toMutableMap()
+        } else {
+            formData.toMutableMap().apply {
+                data.forEach { (key, value) ->
+                    if (key.isNotBlank()) put(key, value?.toString().orEmpty())
+                }
             }
         }
     }
 
-    fun runAction(script: String?, defaultLogin: Boolean = false) {
+    fun rebuildLoginUi(deltaUp: Boolean) {
+        val previous = formData.toMap()
+        val nextJson = resolveLoginUiJson(source)
+        val nextRows = parseLoginRows(nextJson)
+        resolvedLoginUi = nextJson
+        if (deltaUp && nextRows.isNotEmpty()) {
+            formData = nextRows
+                .filter { it.type != RowUi.Type.button && it.name.isNotBlank() }
+                .associate { row -> row.name to (previous[row.name] ?: row.default.orEmpty()) }
+                .toMutableMap()
+        }
+    }
+
+    fun runAction(script: String?, defaultLogin: Boolean = false, isLongClick: Boolean = false) {
         val trimmed = script?.trim().orEmpty()
         // Legado: 按钮 action 为 URL 时打开浏览器（如注册页面）
         if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
@@ -392,13 +425,32 @@ private fun LegadoLoginDialog(
             formData = snapshot,
             actionScript = script,
             runDefaultLogin = defaultLogin,
+            isLongClick = isLongClick,
             onUpdateData = ::updateData,
-            onRebuild = {},
+            onRebuild = ::rebuildLoginUi,
             onStatus = {
                 message = it
                 onStatus(it)
             }
         )
+    }
+
+    LaunchedEffect(rows, formData) {
+        val snapshot = formData.toMap()
+        rowLabels.clear()
+        for (row in rows) {
+            val viewName = row.viewName?.takeIf { it.isNotBlank() } ?: continue
+            if (isQuotedLiteral(viewName)) {
+                rowLabels[row.name] = stripQuotedLiteral(viewName)
+            } else {
+                val evaluated = withContext(Dispatchers.IO) {
+                    evalLoginUiValue(source, activity, snapshot, viewName)
+                }
+                if (!evaluated.isNullOrBlank()) {
+                    rowLabels[row.name] = evaluated
+                }
+            }
+        }
     }
 
     AlertDialog(
@@ -413,15 +465,26 @@ private fun LegadoLoginDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (rows.isNotEmpty()) {
-                    rows.forEach { row ->
-                        LoginRow(
-                            row = row,
-                            value = formData[row.name] ?: row.default.orEmpty(),
-                            onValueChange = { value ->
-                                formData = formData.toMutableMap().apply { put(row.name, value) }
-                            },
-                            onAction = { runAction(row.action, defaultLogin = false) }
-                        )
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        rows.forEach { row ->
+                            if (row.loginUiFlexStyle().layout_wrapBefore) {
+                                Spacer(modifier = Modifier.fillMaxWidth().height(0.dp))
+                            }
+                            LoginRow(
+                                modifier = Modifier.loginUiFlex(row),
+                                row = row,
+                                displayName = rowLabels[row.name] ?: resolveRowDisplayName(row),
+                                value = formData[row.name] ?: row.default.orEmpty(),
+                                onValueChange = { value ->
+                                    formData = formData.toMutableMap().apply { put(row.name, value) }
+                                },
+                                onAction = { isLongClick -> runAction(row.action, defaultLogin = false, isLongClick = isLongClick) }
+                            )
+                        }
                     }
                     Button(
                         modifier = Modifier.fillMaxWidth(),
@@ -476,28 +539,30 @@ private fun LegadoLoginDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun LoginRow(
+    modifier: Modifier,
     row: RowUi,
+    displayName: String,
     value: String,
     onValueChange: (String) -> Unit,
-    onAction: () -> Unit
+    onAction: (Boolean) -> Unit
 ) {
     when (row.type) {
         RowUi.Type.password, RowUi.Type.text -> {
             OutlinedTextField(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = modifier,
                 value = value,
                 onValueChange = { newValue ->
                     onValueChange(newValue)
                     // Legado 20260131: text/password 类型支持 action 键，
                     // 用户完成输入后自动执行对应 JS
                     if (!row.action.isNullOrBlank()) {
-                        onAction()
+                        onAction(false)
                     }
                 },
-                label = { Text(row.name) },
+                label = { Text(displayName) },
                 visualTransformation = if (row.type == RowUi.Type.password) {
                     PasswordVisualTransformation()
                 } else {
@@ -509,17 +574,20 @@ private fun LoginRow(
             val onValue = row.chars?.getOrNull(1) ?: "true"
             val offValue = row.chars?.getOrNull(0) ?: "false"
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = modifier,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     modifier = Modifier.weight(1f),
-                    text = row.name,
+                    text = displayName,
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Switch(
                     checked = value == onValue,
-                    onCheckedChange = { onValueChange(if (it) onValue else offValue) }
+                    onCheckedChange = {
+                        onValueChange(if (it) onValue else offValue)
+                        if (!row.action.isNullOrBlank()) onAction(false)
+                    }
                 )
             }
         }
@@ -527,6 +595,7 @@ private fun LoginRow(
             var expanded by remember { mutableStateOf(false) }
             val options = row.chars?.filterNotNull()?.filter { it.isNotBlank() }.orEmpty()
             ExposedDropdownMenuBox(
+                modifier = modifier,
                 expanded = expanded,
                 onExpandedChange = { expanded = !expanded }
             ) {
@@ -537,7 +606,7 @@ private fun LoginRow(
                     readOnly = true,
                     value = value.ifBlank { options.firstOrNull().orEmpty() },
                     onValueChange = {},
-                    label = { Text(row.name) },
+                    label = { Text(displayName) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
                 )
                 ExposedDropdownMenu(
@@ -550,6 +619,7 @@ private fun LoginRow(
                             onClick = {
                                 expanded = false
                                 onValueChange(option)
+                                if (!row.action.isNullOrBlank()) onAction(false)
                             }
                         )
                     }
@@ -557,21 +627,61 @@ private fun LoginRow(
             }
         }
         RowUi.Type.button -> {
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onAction
+            Surface(
+                modifier = modifier
+                    .heightIn(min = 40.dp)
+                    .combinedClickable(
+                        onClick = { onAction(false) },
+                        onLongClick = { onAction(true) }
+                    ),
+                shape = ButtonDefaults.shape,
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
-                Text(resolveButtonName(row))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(displayName.ifBlank { "执行" })
+                }
             }
         }
         else -> {
             OutlinedTextField(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = modifier,
                 value = value,
                 onValueChange = onValueChange,
-                label = { Text(row.name.ifBlank { row.type }) }
+                label = { Text(displayName.ifBlank { row.type }) }
             )
         }
+    }
+}
+
+private data class LoginUiFlexStyle(
+    val layout_flexGrow: Float = 0F,
+    val layout_flexShrink: Float = 1F,
+    val layout_alignSelf: String = "auto",
+    val layout_flexBasisPercent: Float = -1F,
+    val layout_wrapBefore: Boolean = false,
+    val layout_justifySelf: String = "auto"
+)
+
+private fun RowUi.loginUiFlexStyle(): LoginUiFlexStyle {
+    val rawStyle = style ?: return defaultLoginUiFlexStyle
+    return runCatching {
+        managerGson.fromJson(managerGson.toJson(rawStyle), LoginUiFlexStyle::class.java)
+    }.getOrNull() ?: defaultLoginUiFlexStyle
+}
+
+private fun Modifier.loginUiFlex(row: RowUi): Modifier {
+    val style = row.loginUiFlexStyle()
+    val basis = style.layout_flexBasisPercent
+    return if (basis > 0F && basis <= 1F) {
+        fillMaxWidth(basis)
+    } else {
+        fillMaxWidth()
     }
 }
 
@@ -620,8 +730,9 @@ private fun executeLoginJs(
     formData: Map<String, String>,
     actionScript: String?,
     runDefaultLogin: Boolean,
+    isLongClick: Boolean,
     onUpdateData: (Map<String, Any?>?) -> Unit,
-    onRebuild: () -> Unit,
+    onRebuild: (Boolean) -> Unit,
     onStatus: (String) -> Unit
 ) {
     Thread {
@@ -632,11 +743,11 @@ private fun executeLoginJs(
                 sourceUrl = source.bookSourceUrl,
                 callback = object : LoginJsBridge.Callback {
                     override fun upLoginData(data: Map<String, Any?>?) {
-                        onUpdateData(data)
+                        mainThread { onUpdateData(data) }
                     }
 
                     override fun reLoginView(deltaUp: Boolean) {
-                        onRebuild()
+                        mainThread { onRebuild(deltaUp) }
                     }
                 },
                 bookSource = source
@@ -647,10 +758,16 @@ private fun executeLoginJs(
             try {
                 cx.optimizationLevel = -1
                 val scope = cx.initStandardObjects()
+                SharedJsScope.getScope(source.jsLib)?.let { scope.prototype = it }
                 ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
                 ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
                 ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
                 ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
+                ScriptableObject.putProperty(scope, "book", null)
+                ScriptableObject.putProperty(scope, "chapter", null)
+                ScriptableObject.putProperty(scope, "baseUrl", source.bookSourceUrl)
+                ScriptableObject.putProperty(scope, "loginUrl", source.loginUrl.orEmpty())
+                ScriptableObject.putProperty(scope, "isLongClick", isLongClick)
                 val resultObj = cx.newObject(scope)
                 formData.forEach { (key, value) -> ScriptableObject.putProperty(resultObj, key, value) }
                 ScriptableObject.putProperty(scope, "result", resultObj)
@@ -675,6 +792,45 @@ private fun executeLoginJs(
             mainThread { onStatus("登录脚本执行失败: ${e.message ?: e.javaClass.simpleName}") }
         }
     }.start()
+}
+
+private fun evalLoginUiValue(
+    source: BookSource,
+    activity: Activity?,
+    formData: Map<String, String>,
+    js: String
+): String? {
+    return try {
+        val bridge = LoginJsBridge(activity, source.bookSourceUrl, bookSource = source)
+        bridge.loginData = formData.toMutableMap()
+        val cx = RhinoContext.enter()
+        try {
+            cx.optimizationLevel = -1
+            val scope = cx.initStandardObjects()
+            SharedJsScope.getScope(source.jsLib)?.let { scope.prototype = it }
+            ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
+            ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
+            ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
+            ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
+            ScriptableObject.putProperty(scope, "book", null)
+            ScriptableObject.putProperty(scope, "chapter", null)
+            ScriptableObject.putProperty(scope, "baseUrl", source.bookSourceUrl)
+            ScriptableObject.putProperty(scope, "loginUrl", source.loginUrl.orEmpty())
+            val resultObj = cx.newObject(scope)
+            formData.forEach { (key, value) -> ScriptableObject.putProperty(resultObj, key, value) }
+            ScriptableObject.putProperty(scope, "result", resultObj)
+            cx.evaluateString(scope, "result.get=function(key){return result[key] || '';};", "result_get", 1, null)
+            val loginJs = source.getLoginJs().orEmpty()
+            if (loginJs.isNotBlank()) {
+                cx.evaluateString(scope, loginJs, "login_js", 1, null)
+            }
+            cx.evaluateString(scope, js, "login_view_name", 1, null)?.toString()
+        } finally {
+            RhinoContext.exit()
+        }
+    } catch (_: Exception) {
+        null
+    }
 }
 
 private fun resolveLoginUiJson(source: BookSource): String {
@@ -725,13 +881,20 @@ private fun resolveLoginUrl(source: BookSource): String {
     }
 }
 
-private fun resolveButtonName(row: RowUi): String {
+private fun resolveRowDisplayName(row: RowUi): String {
     val raw = row.viewName ?: row.name
-    return raw
-        .takeIf { it.length in 2..80 && it.first() == '\'' && it.last() == '\'' }
-        ?.substring(1, raw.length - 1)
-        ?: raw.ifBlank { "执行" }
+    return if (isQuotedLiteral(raw)) {
+        stripQuotedLiteral(raw)
+    } else {
+        row.name.ifBlank { raw.ifBlank { "执行" } }
+    }
 }
+
+private fun isQuotedLiteral(value: String): Boolean =
+    value.length >= 2 && value.first() == '\'' && value.last() == '\''
+
+private fun stripQuotedLiteral(value: String): String =
+    value.substring(1, value.length - 1)
 
 private fun syncWebViewCookie(url: String) {
     if (!url.startsWith("http://") && !url.startsWith("https://")) return

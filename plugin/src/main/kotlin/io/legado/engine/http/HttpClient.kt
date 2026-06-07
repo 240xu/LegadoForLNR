@@ -260,4 +260,10 @@ data class HttpResponse(
 ) {
     fun header(name: String): String = headers[name]?.firstOrNull() ?: headers[name.lowercase()]?.firstOrNull() ?: ""
     fun isSuccessful(): Boolean = code in 200..299
+    fun request(): RequestInfo = RequestInfo(url)
+}
+
+class RequestInfo(private val requestUrl: String) {
+    fun url(): String = requestUrl
+    override fun toString(): String = requestUrl
 }

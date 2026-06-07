@@ -136,7 +136,8 @@ class LoginJsBridge(
         val headerMap = try {
             com.google.gson.Gson().fromJson<Map<String, String>>(header, object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type)
         } catch (_: Exception) { null }
-        headerMap?.get("Cookie")?.let { CookieStore.replaceCookie(sourceUrl, it) }
+        val cookie = headerMap?.get("Cookie") ?: headerMap?.get("cookie")
+        cookie?.let { CookieStore.replaceCookie(sourceUrl, it) }
         try {
             CacheManager.put("loginHeader_$sourceUrl", header)
             val prefs = activityRef.get()?.getSharedPreferences("legado_login_info", android.content.Context.MODE_PRIVATE)
@@ -314,12 +315,12 @@ class LoginJsBridge(
 
     fun upLoginData(data: Any?) {
         val map = data.toAnyMap()
-        activityRef.get()?.runOnUiThread { callback?.upLoginData(map) }
+        runOnUi { callback?.upLoginData(map) }
     }
 
     fun reLoginView() { reLoginView(false) }
     fun reLoginView(deltaUp: Boolean) {
-        activityRef.get()?.runOnUiThread { callback?.reLoginView(deltaUp) }
+        runOnUi { callback?.reLoginView(deltaUp) }
     }
 
     // ==================== 工具方法 ====================
@@ -449,7 +450,7 @@ class LoginJsBridge(
 
     /** 刷新发现页 */
     fun refreshExplore() {
-        activityRef.get()?.runOnUiThread { callback?.reLoginView(false) }
+        runOnUi { callback?.reLoginView(false) }
     }
 
     /** 刷新书籍信息 */
@@ -527,6 +528,15 @@ class LoginJsBridge(
             is NativeObject -> headers.toAnyMap().orEmpty().mapValues { it.value?.toString().orEmpty() }
             is String -> UrlOptionParser.parseHeaders(headers)
             else -> emptyMap()
+        }
+    }
+
+    private fun runOnUi(block: () -> Unit) {
+        val activity = activityRef.get()
+        if (activity != null) {
+            activity.runOnUiThread(block)
+        } else {
+            Handler(Looper.getMainLooper()).post(block)
         }
     }
 

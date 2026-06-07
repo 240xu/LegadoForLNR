@@ -343,7 +343,13 @@ class AnalyzeUrl(
     private fun setCookie() {
         if (enabledCookieJar) {
             val cookie = CookieStore.getCookie(domain)
-            if (cookie.isNotBlank()) headerMap["Cookie"] = cookie
+            if (cookie.isNotBlank()) {
+                val explicitCookie = headerMap.entries
+                    .firstOrNull { it.key.equals("Cookie", true) }
+                    ?.value
+                headerMap.keys.removeAll { it.equals("Cookie", true) }
+                headerMap["Cookie"] = mergeCookies(cookie, explicitCookie)
+            }
         }
     }
 
@@ -523,6 +529,23 @@ class AnalyzeUrl(
     companion object {
         private val legacyPagePattern: Pattern = Pattern.compile("<(.*?)>")
         private val percentEncodedPattern: Pattern = Pattern.compile("%[0-9a-fA-F]{2}")
+
+        private fun mergeCookies(storedCookie: String, explicitCookie: String?): String {
+            if (explicitCookie.isNullOrBlank()) return storedCookie
+            val cookies = LinkedHashMap<String, String>()
+            fun append(header: String) {
+                header.split(";")
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() && it.contains("=") }
+                    .forEach { part ->
+                        val name = part.substringBefore("=").trim()
+                        if (name.isNotBlank()) cookies[name] = part
+                    }
+            }
+            append(storedCookie)
+            append(explicitCookie)
+            return cookies.values.joinToString("; ")
+        }
 
         private fun unwrapJs(jsStr: String): String {
             return when {
