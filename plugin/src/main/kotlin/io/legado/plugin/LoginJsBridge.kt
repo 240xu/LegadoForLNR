@@ -660,14 +660,20 @@ class LoginJsBridge(
             // 把插件 CookieStore 中已有的 cookie 注入 WebView
             val preSyncUrl = url.takeIf { it.startsWith("http://") || it.startsWith("https://") }
                 ?: sourceUrl.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-            preSyncUrl?.let { injectStoredCookies(it) }
-            webView.addJavascriptInterface(this@LoginJsBridge, "java")
+            preSyncUrl?.let { injectStoredCookiesToWebView(it) }
+            val javaBridge = LegadoJavaWebBridge(this@LoginJsBridge)
+            val sourceBridge = LegadoWebBridge(this@LoginJsBridge)
+            val cacheBridge = LegadoCacheWebBridge()
+            webView.addJavascriptInterface(javaBridge, "java")
+            webView.addJavascriptInterface(sourceBridge, "source")
+            webView.addJavascriptInterface(cacheBridge, "cache")
             webView.webChromeClient = WebChromeClient()
             webView.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, pageUrl: String?) {
                     super.onPageFinished(view, pageUrl)
                     if (!pageUrl.isNullOrBlank()) currentUrl.set(pageUrl)
                     syncCookies(pageUrl)
+                    view?.evaluateJavascript(legadoWebBootstrapScript(bookSource?.jsLib, sourceUrl, pageUrl ?: url), null)
                     preloadJs?.takeIf { it.isNotBlank() }?.let { view?.evaluateJavascript(it, null) }
                 }
 
@@ -697,20 +703,6 @@ class LoginJsBridge(
             }
         }
         return result.get()
-    }
-
-    /**
-     * 把插件 CookieStore 中某域名的 cookie 注入 Android WebView CookieManager，
-     * 使 WebView loadUrl 时能自动携带已登录的 cookie。
-     */
-    private fun injectStoredCookies(targetUrl: String) {
-        try {
-            val stored = CookieStore.getCookieHeader(targetUrl)["Cookie"]
-            if (!stored.isNullOrBlank()) {
-                CookieManager.getInstance().setCookie(targetUrl, stored)
-                CookieManager.getInstance().flush()
-            }
-        } catch (_: Exception) {}
     }
 
     private fun decodeJsString(value: String?): String {

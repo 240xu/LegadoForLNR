@@ -68,9 +68,11 @@ class LegadoHtmlComponent(
     override fun Content(modifier: Modifier) {
         val source = remember(data.sourceJson) { parseLegadoHtmlSource(data.sourceJson) }
         val sourceUrl = data.sourceUrl.ifBlank { source?.bookSourceUrl ?: data.baseUrl }
-        val bridge = remember(sourceUrl, source) {
-            LegadoWebBridge(LoginJsBridge(null, sourceUrl, bookSource = source))
+        val loginBridge = remember(sourceUrl, source) {
+            LoginJsBridge(null, sourceUrl, bookSource = source)
         }
+        val javaBridge = remember(loginBridge) { LegadoJavaWebBridge(loginBridge) }
+        val sourceBridge = remember(loginBridge) { LegadoWebBridge(loginBridge) }
         val cacheBridge = remember { LegadoCacheWebBridge() }
         val html = remember(data.html, data.jsLib, sourceUrl, data.baseUrl) {
             injectLegadoWebBootstrap(data.html, data.jsLib, sourceUrl, data.baseUrl)
@@ -95,8 +97,9 @@ class LegadoHtmlComponent(
                     settings.useWideViewPort = true
                     CookieManager.getInstance().setAcceptCookie(true)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                    addJavascriptInterface(bridge, "java")
-                    addJavascriptInterface(bridge, "source")
+                    injectStoredCookiesToWebView(data.baseUrl.ifBlank { sourceUrl })
+                    addJavascriptInterface(javaBridge, "java")
+                    addJavascriptInterface(sourceBridge, "source")
                     addJavascriptInterface(cacheBridge, "cache")
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {

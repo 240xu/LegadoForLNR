@@ -1,5 +1,42 @@
 ﻿package io.legado.plugin
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.Divider
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import io.legado.engine.webBook.WebBook
 import io.legado.engine.js.SourceOpenCallback
 import io.legado.engine.js.SourceLoginCallback
@@ -26,9 +63,11 @@ import io.legado.engine.shim.AndroidContext
 import io.legado.engine.shim.CacheManager
 import io.legado.engine.shim.GSON
 import io.legado.engine.shim.SourceConfig
+import io.nightfish.lightnovelreader.api.Route
 import io.nightfish.lightnovelreader.api.book.*
 import io.nightfish.lightnovelreader.api.explore.ExploreBooksRow
 import io.nightfish.lightnovelreader.api.explore.ExploreDisplayBook
+import io.nightfish.lightnovelreader.api.ui.LocalNavController
 import io.nightfish.lightnovelreader.api.util.LocalString
 import io.nightfish.lightnovelreader.api.web.WebBookDataSource
 import io.nightfish.lightnovelreader.api.web.WebDataSource
@@ -41,8 +80,10 @@ import io.nightfish.lightnovelreader.api.web.explore.filter.SwitchFilter
 import io.nightfish.lightnovelreader.api.web.search.SearchProvider
 import io.nightfish.lightnovelreader.api.web.search.SearchResult
 import io.nightfish.lightnovelreader.api.web.search.SearchType
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import org.mozilla.javascript.NativeObject
@@ -81,6 +122,18 @@ class LegadoJsonWebDataSource(
     private data class OpenEvent(val type: String, val url: String, val title: String)
 
     private data class AssignedArray(val text: String, val endIndex: Int)
+
+    private class LegadoExploreUiState {
+        var selectedSourceUrl by mutableStateOf("")
+        var selectedKindKey by mutableStateOf("")
+        var reloadToken by mutableIntStateOf(0)
+        var page by mutableIntStateOf(1)
+        var loading by mutableStateOf(false)
+        var ended by mutableStateOf(false)
+        var error by mutableStateOf<String?>(null)
+        val books = mutableStateListOf<BookInformation>()
+        val textInputs = mutableStateMapOf<String, String>()
+    }
 
     private class ExploreInfoMap(private val sourceUrl: String) : MutableMap<String, String> {
         private var actualMap: MutableMap<String, String> = load()
@@ -203,7 +256,18 @@ class LegadoJsonWebDataSource(
     }
 
     // ==================== ExplorePageProvider ====================
-    override val explorePageProvider: ExplorePageProvider = object : ExplorePageProvider.DefaultExplorePageProvider {
+    override val explorePageProvider: ExplorePageProvider = object :
+        ExplorePageProvider.DefaultExplorePageProvider,
+        ExplorePageProvider.CustomExplorePageProvider<LegadoExploreUiState> {
+        override val uiState = LegadoExploreUiState()
+
+        override fun init(viewModelScope: CoroutineScope) = Unit
+
+        @Composable
+        override fun Content(nestedScrollConnection: NestedScrollConnection) {
+            LegadoExploreContent(uiState, nestedScrollConnection)
+        }
+
         private val sourceKinds: Map<BookSource, List<ExploreKind>>
             get() = getEnabledSources()
                 .filter { it.enabledExplore && !it.exploreUrl.isNullOrBlank() }
@@ -315,6 +379,333 @@ class LegadoJsonWebDataSource(
                 return result
             }
     }
+
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+    @Composable
+    private fun LegadoExploreContent(
+        state: LegadoExploreUiState,
+        nestedScrollConnection: NestedScrollConnection
+    ) {
+        val navController = LocalNavController.current
+        val scope = rememberCoroutineScope()
+        val sources = getEnabledSources()
+            .filter { it.enabledExplore && !it.exploreUrl.isNullOrBlank() }
+        if (sources.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(nestedScrollConnection)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("暂无启用的 Legado 发现书源", style = MaterialTheme.typography.titleMedium)
+                Text("导入并启用带发现规则的书源后会显示在这里。", style = MaterialTheme.typography.bodyMedium)
+            }
+            return
+        }
+
+        LaunchedEffect(sources.map { it.bookSourceUrl }) {
+            if (state.selectedSourceUrl !in sources.map { it.bookSourceUrl }) {
+                state.selectedSourceUrl = sources.first().bookSourceUrl
+                state.selectedKindKey = ""
+                state.reloadToken++
+            }
+        }
+
+        val source = sources.firstOrNull { it.bookSourceUrl == state.selectedSourceUrl } ?: sources.first()
+        val kinds = remember(source.bookSourceUrl, state.reloadToken) { parseExploreKinds(source) }
+        val urlKinds = kinds.filter { it.type.equals("url", true) && it.url.isNotBlank() }
+        val controlKinds = kinds.filter { it.type.lowercase() in setOf("toggle", "select", "text", "button") }
+        val selectedKind = urlKinds.firstOrNull { it.exploreStateKey() == state.selectedKindKey }
+            ?: urlKinds.firstOrNull()
+
+        LaunchedEffect(source.bookSourceUrl, urlKinds.map { it.exploreStateKey() }) {
+            val selectedKey = selectedKind?.exploreStateKey().orEmpty()
+            if (selectedKey.isNotBlank() && state.selectedKindKey != selectedKey) {
+                state.selectedKindKey = selectedKey
+            }
+        }
+
+        fun loadPage(page: Int) {
+            val kind = selectedKind ?: return
+            if (state.loading || (page > 1 && state.ended)) return
+            scope.launch {
+                state.loading = true
+                state.error = null
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        WebBook.exploreBookAwait(source, kind.url, page, exploreInfoMap(source))
+                    }
+                }.onSuccess { books ->
+                    if (page == 1) state.books.clear()
+                    state.books.addAll(books.map { createBookInformation(source, it) })
+                    state.page = page
+                    state.ended = books.isEmpty()
+                    if (books.isEmpty() && page == 1) promptLoginIfNoAuth(source)
+                }.onFailure { error ->
+                    if (page == 1) state.books.clear()
+                    state.error = error.message ?: error::class.java.simpleName
+                    promptLoginIfNoAuth(source)
+                }
+                state.loading = false
+            }
+        }
+
+        LaunchedEffect(source.bookSourceUrl, selectedKind?.exploreStateKey(), state.reloadToken) {
+            state.page = 1
+            state.ended = false
+            loadPage(1)
+        }
+
+        var selectDialogKind by remember { mutableStateOf<ExploreKind?>(null) }
+        val listState = rememberLazyListState()
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(nestedScrollConnection),
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    sources.forEach { item ->
+                        FilterChip(
+                            selected = item.bookSourceUrl == source.bookSourceUrl,
+                            onClick = {
+                                state.selectedSourceUrl = item.bookSourceUrl
+                                state.selectedKindKey = ""
+                                state.reloadToken++
+                            },
+                            label = {
+                                Text(
+                                    item.bookSourceName.ifBlank { item.bookSourceUrl },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+            if (controlKinds.isNotEmpty()) {
+                item {
+                    ExploreControls(
+                        source = source,
+                        kinds = controlKinds,
+                        state = state,
+                        onSelectDialog = { selectDialogKind = it }
+                    )
+                }
+            }
+            if (urlKinds.isNotEmpty()) {
+                item {
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        urlKinds.forEach { kind ->
+                            val key = kind.exploreStateKey()
+                            FilterChip(
+                                selected = key == selectedKind?.exploreStateKey(),
+                                onClick = {
+                                    state.selectedKindKey = key
+                                    state.reloadToken++
+                                },
+                                label = { Text(kind.displayTitle(), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            )
+                        }
+                    }
+                }
+            }
+            if (state.loading && state.books.isEmpty()) {
+                item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+            }
+            state.error?.let { message ->
+                item {
+                    Text(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        text = message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+            items(state.books, key = { it.id }) { book ->
+                ListItem(
+                    modifier = Modifier.clickable { navController.navigate(Route.Book.Detail(book.id)) },
+                    headlineContent = { Text(book.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    supportingContent = {
+                        val subtitle = listOf(book.author, book.subtitle).filter { it.isNotBlank() }.joinToString("  ")
+                        if (subtitle.isNotBlank()) Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                )
+                Divider()
+            }
+            if (selectedKind != null && state.books.isNotEmpty() && !state.ended) {
+                item {
+                    Button(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        enabled = !state.loading,
+                        onClick = { loadPage(state.page + 1) }
+                    ) {
+                        Text(if (state.loading) "加载中" else "加载更多")
+                    }
+                }
+            }
+        }
+
+        selectDialogKind?.let { kind ->
+            val choices = kind.chars?.filterNotNull()?.filter { it.isNotBlank() }.orEmpty()
+            AlertDialog(
+                onDismissRequest = { selectDialogKind = null },
+                title = { Text(kind.displayTitle()) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        choices.forEach { choice ->
+                            TextButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    applyExploreControl(source, kind, choice)
+                                    runExploreAction(source, kind)
+                                    state.reloadToken++
+                                    selectDialogKind = null
+                                }
+                            ) { Text(choice) }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { selectDialogKind = null }) { Text("关闭") }
+                }
+            )
+        }
+    }
+
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+    @Composable
+    private fun ExploreControls(
+        source: BookSource,
+        kinds: List<ExploreKind>,
+        state: LegadoExploreUiState,
+        onSelectDialog: (ExploreKind) -> Unit
+    ) {
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            kinds.forEach { kind ->
+                val key = kind.title.ifBlank { kind.displayTitle() }
+                when (kind.type.lowercase()) {
+                    "toggle" -> {
+                        val onValue = kind.chars?.getOrNull(1) ?: "true"
+                        val offValue = kind.chars?.getOrNull(0) ?: "false"
+                        val selected = currentExploreControlValue(source, kind) == onValue
+                        FilterChip(
+                            selected = selected,
+                            onClick = {
+                                applyExploreControl(source, kind, if (selected) offValue else onValue)
+                                runExploreAction(source, kind)
+                                state.reloadToken++
+                            },
+                            label = { Text(kind.displayTitle(), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        )
+                    }
+                    "select" -> {
+                        AssistChip(
+                            onClick = { onSelectDialog(kind) },
+                            label = {
+                                val value = currentExploreControlValue(source, kind).ifBlank { kind.default.orEmpty() }
+                                Text("${kind.displayTitle()}: $value", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        )
+                    }
+                    "text" -> {
+                        var textValue by remember(source.bookSourceUrl, key, state.reloadToken) {
+                            mutableStateOf(state.textInputs[key] ?: currentExploreControlValue(source, kind))
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                modifier = Modifier.weight(1f),
+                                value = textValue,
+                                onValueChange = {
+                                    textValue = it
+                                    state.textInputs[key] = it
+                                },
+                                label = { Text(kind.displayTitle()) },
+                                singleLine = true
+                            )
+                            Button(
+                                modifier = Modifier.padding(top = 8.dp),
+                                onClick = {
+                                    applyExploreControl(source, kind, textValue)
+                                    runExploreAction(source, kind)
+                                    state.reloadToken++
+                                }
+                            ) {
+                                Text("应用")
+                            }
+                        }
+                    }
+                    "button" -> {
+                        Button(
+                            onClick = {
+                                runExploreAction(source, kind)
+                                state.reloadToken++
+                            }
+                        ) {
+                            Text(kind.displayTitle().ifBlank { "执行" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun currentExploreControlValue(source: BookSource, kind: ExploreKind): String {
+        val key = kind.title.ifBlank { kind.displayTitle() }
+        return SourceConfig.get(source.bookSourceUrl, key)
+            ?: exploreInfoMap(source)[key]
+            ?: kind.default
+            ?: kind.chars?.firstOrNull { !it.isNullOrBlank() }
+            ?: ""
+    }
+
+    private fun applyExploreControl(source: BookSource, kind: ExploreKind, value: String) {
+        val key = kind.title.ifBlank { kind.displayTitle() }
+        SourceConfig.put(source.bookSourceUrl, key, value)
+        source.put(key, value)
+        exploreInfoMap(source)[key] = value
+    }
+
+    private fun runExploreAction(source: BookSource, kind: ExploreKind) {
+        kind.action?.takeIf { it.isNotBlank() }?.let { action ->
+            runCatching {
+                source.evalJS(action) { bindings ->
+                    bindings["infoMap"] = exploreInfoMap(source)
+                }
+            }
+        }
+    }
+
+    private fun ExploreKind.exploreStateKey(): String =
+        listOf(displayTitle(), url, type).joinToString("\n")
 
     init {
         if (!AndroidContext.isInitialized()) {

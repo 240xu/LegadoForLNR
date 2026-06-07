@@ -365,10 +365,13 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             settings.javaScriptEnabled = true; settings.domStorageEnabled = true
             settings.userAgentString = io.legado.engine.constant.AppConst.USER_AGENT
-            val webBridge = LegadoWebBridge(loginJsBridge!!)
+            val javaBridge = LegadoJavaWebBridge(loginJsBridge!!)
+            val sourceBridge = LegadoWebBridge(loginJsBridge!!)
             val cacheBridge = LegadoCacheWebBridge()
-            addJavascriptInterface(webBridge, "java")
-            addJavascriptInterface(webBridge, "source")
+            injectStoredCookiesToWebView(actualUrl)
+            injectStoredCookiesToWebView(source.bookSourceUrl)
+            addJavascriptInterface(javaBridge, "java")
+            addJavascriptInterface(sourceBridge, "source")
             addJavascriptInterface(cacheBridge, "cache")
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {

@@ -693,9 +693,11 @@ private fun LegadoWebLoginPanel(
     onStatus: (String) -> Unit
 ) {
     val loginUrl = remember(source) { resolveLoginUrl(source) }
-    val webBridge = remember(source, activity) {
-        LegadoWebBridge(LoginJsBridge(activity, source.bookSourceUrl, bookSource = source))
+    val loginBridge = remember(source, activity) {
+        LoginJsBridge(activity, source.bookSourceUrl, bookSource = source)
     }
+    val javaBridge = remember(loginBridge) { LegadoJavaWebBridge(loginBridge) }
+    val sourceBridge = remember(loginBridge) { LegadoWebBridge(loginBridge) }
     val cacheBridge = remember { LegadoCacheWebBridge() }
     AndroidView(
         modifier = Modifier
@@ -708,8 +710,10 @@ private fun LegadoWebLoginPanel(
                 settings.userAgentString = io.legado.engine.constant.AppConst.USER_AGENT
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                addJavascriptInterface(webBridge, "java")
-                addJavascriptInterface(webBridge, "source")
+                injectStoredCookiesToWebView(loginUrl)
+                injectStoredCookiesToWebView(source.bookSourceUrl)
+                addJavascriptInterface(javaBridge, "java")
+                addJavascriptInterface(sourceBridge, "source")
                 addJavascriptInterface(cacheBridge, "cache")
                 webChromeClient = WebChromeClient()
                 webViewClient = object : WebViewClient() {
