@@ -35,11 +35,6 @@ android {
     packaging {
         resources {
             excludes += "META-INF/INDEX.LIST"
-        }
-    }
-    packaging {
-        resources {
-            excludes += "META-INF/INDEX.LIST"
             excludes += "META-INF/DEPENDENCIES"
         }
     }
@@ -64,7 +59,12 @@ androidComponents {
 tasks.withType<KotlinJvmCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
-        freeCompilerArgs.add("-opt-in=kotlin.RequiresOptIn")
+        freeCompilerArgs.addAll(
+            listOf(
+                "-opt-in=kotlin.RequiresOptIn",
+                "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+            )
+        )
     }
 }
 

@@ -3,6 +3,7 @@ package io.legado.engine.http
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import io.legado.engine.shim.AppConfig
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -32,7 +33,7 @@ object HttpClient {
                 val request = chain.request()
                 val builder = request.newBuilder()
                 if (request.header("User-Agent") == null) {
-                    builder.addHeader("User-Agent", "io.legado.engine.shim.AppConfig.userAgent")
+                    builder.addHeader("User-Agent", AppConfig.userAgent)
                 }
                 builder.addHeader("Keep-Alive", "300")
                 builder.addHeader("Connection", "Keep-Alive")
@@ -159,7 +160,7 @@ object HttpClient {
         merged.putAll(CookieStore.getCookieHeader(url))
         merged.putAll(custom)
         if (!merged.containsKey("User-Agent") && !merged.containsKey("user-agent")) {
-            merged["User-Agent"] = "io.legado.engine.shim.AppConfig.userAgent"
+            merged["User-Agent"] = AppConfig.userAgent
         }
         return merged
     }

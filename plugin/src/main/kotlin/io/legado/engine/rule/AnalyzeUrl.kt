@@ -18,9 +18,19 @@ import io.legado.engine.js.SharedJsScope
 import io.legado.engine.shim.CacheManager
 import io.legado.engine.shim.Debug
 import io.legado.engine.shim.GSON
+import io.legado.engine.shim.fromJsonObject
 import io.legado.engine.webview.BackstageWebView
 import kotlinx.coroutines.runBlocking
+import okhttp3.Headers
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
+import java.io.InputStream
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Base64
@@ -59,6 +69,8 @@ class AnalyzeUrl(
     private var dnsIp: String? = null
     private var webViewDelayTime: Long = 0
     private var dataBody: String? = null
+    var serverID: Long? = null
+        private set
     // lyc 源默认不设此字段时当作 true，确保 cookie 能正常收发
     private val enabledCookieJar = source?.enabledCookieJar != false
     private val domain: String
@@ -154,6 +166,7 @@ class AnalyzeUrl(
             option["bodyJs"]?.toString()?.takeIf { it.isNotBlank() }?.let { bodyJs = it }
             option["dnsIp"]?.toString()?.takeIf { it.isNotBlank() }?.let { dnsIp = it }
             option["dns"]?.toString()?.takeIf { it.isNotBlank() }?.let { dnsIp = it }
+            option["serverID"]?.toString()?.toLongOrNull()?.let { serverID = it }
             option["proxy"]?.toString()?.takeIf { it.isNotBlank() }?.let { proxy = it }
             option["origin"]?.toString()?.takeIf { it.isNotBlank() }?.let { headerMap["Origin"] = it }
             option["webViewDelayTime"]?.toString()?.toLongOrNull()?.let { webViewDelayTime = max(0, it) }
@@ -394,8 +407,7 @@ class AnalyzeUrl(
     fun setCharset(value: String?) { charset = value }
     fun getDnsIp(): String? = dnsIp
     fun setDnsIp(value: String?) { dnsIp = value }
-    fun getServerID(): Long? = null
-    fun setServerID(value: String?) { /* no-op: serverID not tracked */ }
+    fun setServerID(value: String?) { serverID = value?.takeIf { it.isNotBlank() }?.toLongOrNull() }
     fun getUserAgent(): String = headerMap["User-Agent"] ?: ""
     fun getWebViewDelayTime(): Long = webViewDelayTime
     fun setWebViewDelayTime(value: String?) { webViewDelayTime = value?.toLongOrNull() ?: 0L }
@@ -406,7 +418,43 @@ class AnalyzeUrl(
     fun getErrStrResponse(e: Throwable): StrResponse = StrResponse(getErrResponse(e))
     suspend fun getByteArrayAwait(): ByteArray { val resp = execute(); return resp.body.toByteArray(java.nio.charset.Charset.forName(charset ?: "UTF-8")) }
     suspend fun getInputStreamAwait(): java.io.InputStream { val resp = execute(); return resp.body.byteInputStream() }
-    suspend fun upload(fileName: String, file: Any, contentType: String): StrResponse { return StrResponse(HttpResponse(url ?: "", "", 501)) }
+    suspend fun upload(fileName: String, file: Any, contentType: String): StrResponse {
+        setCookie()
+        val bodyMap = GSON.fromJsonObject<LinkedHashMap<String, Any?>>(body) ?: linkedMapOf()
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .apply {
+                bodyMap.forEach { (key, value) ->
+                    if (value?.toString() == "fileRequest") {
+                        addFormDataPart(key, fileName, file.asRequestBody(contentType))
+                    } else {
+                        addFormDataPart(key, valueToString(value) ?: "")
+                    }
+                }
+                if (bodyMap.values.none { it?.toString() == "fileRequest" }) {
+                    addFormDataPart("file", fileName, file.asRequestBody(contentType))
+                }
+            }
+            .build()
+        val request = Request.Builder()
+            .url(urlNoQuery.ifBlank { url })
+            .post(multipart)
+            .apply {
+                headerMap.forEach { (key, value) ->
+                    if (!key.equals("Content-Type", true)) addHeader(key, value)
+                }
+            }
+            .build()
+        val response = getClient().newCall(request).execute()
+        val httpResponse = HttpResponse(
+            response.request.url.toString(),
+            response.body?.string() ?: "",
+            response.code,
+            response.headers.toCaseInsensitiveMap()
+        )
+        saveCookie(httpResponse)
+        return StrResponse(httpResponse)
+    }
 
     companion object {
         private fun unwrapJs(jsStr: String): String {
@@ -468,6 +516,32 @@ class AnalyzeUrl(
                 java.net.URLDecoder.decode(payload, charset ?: "UTF-8")
             }
         }.getOrNull()
+    }
+
+    private fun Any.asRequestBody(contentType: String): RequestBody {
+        val mediaType = contentType.toMediaTypeOrNull()
+        return when (this) {
+            is ByteArray -> this.toRequestBody(mediaType)
+            is File -> this.asRequestBody(mediaType)
+            is InputStream -> this.readBytes().toRequestBody(mediaType)
+            else -> {
+                val pathFile = File(toString())
+                if (pathFile.exists() && pathFile.isFile) {
+                    pathFile.asRequestBody(mediaType)
+                } else {
+                    toString().toRequestBody(mediaType)
+                }
+            }
+        }
+    }
+
+    private fun Headers.toCaseInsensitiveMap(): Map<String, List<String>> {
+        val result = linkedMapOf<String, MutableList<String>>()
+        for (name in names()) {
+            result.getOrPut(name.lowercase()) { mutableListOf() }.addAll(values(name))
+            result.getOrPut(name) { mutableListOf() }.addAll(values(name))
+        }
+        return result
     }
 
 }

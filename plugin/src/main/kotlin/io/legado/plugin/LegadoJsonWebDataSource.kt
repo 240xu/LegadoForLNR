@@ -8,7 +8,6 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import com.google.gson.Gson
-import com.google.gson.GsonBuilder
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject as GsonJsonObject
 import com.google.gson.JsonParser
@@ -24,6 +23,7 @@ import io.legado.engine.rule.AnalyzeUrl
 import io.legado.engine.rule.UrlOptionParser
 import io.legado.engine.shim.AndroidContext
 import io.legado.engine.shim.CacheManager
+import io.legado.engine.shim.GSON
 import io.legado.engine.shim.SourceConfig
 import io.nightfish.lightnovelreader.api.book.*
 import io.nightfish.lightnovelreader.api.explore.ExploreBooksRow
@@ -61,7 +61,7 @@ class LegadoJsonWebDataSource(
 ) : WebBookDataSource {
 
     companion object {
-        private val gson: Gson = GsonBuilder().create()
+        private val gson: Gson = GSON
         private const val SEPARATOR = "::"
         private const val EXPLORE_PREVIEW_ROW_LIMIT = 12
         private const val EXPLORE_PREVIEW_BOOK_LIMIT = 12
@@ -71,6 +71,8 @@ class LegadoJsonWebDataSource(
     private val exploreInfoMaps = java.util.concurrent.ConcurrentHashMap<String, ExploreInfoMap>()
     private val loginPromptTimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val openEvents = ConcurrentLinkedQueue<OpenEvent>()
+    @Volatile
+    private var currentImageHeader: Map<String, String> = emptyMap()
 
     private data class OpenEvent(val type: String, val url: String, val title: String)
 
@@ -161,7 +163,7 @@ class LegadoJsonWebDataSource(
     override suspend fun isOffLine(): Boolean = false
     override val offLine: Boolean = false
     override val isOffLineFlow: StateFlow<Boolean> = MutableStateFlow(false)
-    override val imageHeader: Map<String, String> get() = emptyMap()
+    override val imageHeader: Map<String, String> get() = currentImageHeader
 
     // ==================== SearchProvider ====================
     override val searchProvider: SearchProvider = object : SearchProvider {
@@ -1017,6 +1019,7 @@ class LegadoJsonWebDataSource(
     private fun cleanImageUrl(raw: String?, baseUrl: String): String {
         val value = raw?.trim().orEmpty()
         if (value.isBlank()) return ""
+        rememberImageHeaders(value)
         // Legado 图片格式: url,{"click":"...","style":"TEXT","width":"50%"}
         // 剥离尾部 JSON 参数，只保留纯 URL
         val stripped = stripLegadoImageParams(value).let { UrlOptionParser.strip(it) }
@@ -1051,6 +1054,26 @@ class LegadoJsonWebDataSource(
     private fun extractLegadoImageParams(raw: String): String? {
         val match = Regex(",\\s*(\\{[\\s\\S]*})\$").find(raw.trim())
         return match?.groupValues?.getOrNull(1)
+    }
+
+    private fun rememberImageHeaders(raw: String) {
+        val params = extractLegadoImageParams(raw) ?: return
+        val headersElement = parseJsonLenient(params)
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+            ?.get("headers")
+            ?: return
+        val headers = when {
+            headersElement.isJsonObject -> headersElement.asJsonObject.entrySet().mapNotNull { (key, value) ->
+                val headerValue = jsonScalarString(value)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                key to headerValue
+            }.toMap()
+            headersElement.isJsonPrimitive -> UrlOptionParser.parseHeaderLines(headersElement.asString)
+            else -> emptyMap()
+        }
+        if (headers.isNotEmpty()) {
+            currentImageHeader = currentImageHeader + headers
+        }
     }
 
 
@@ -1187,6 +1210,7 @@ class LegadoJsonWebDataSource(
             val (sourceUrl, chapterUrl) = parseId(chapterId)
             val source = getSource(sourceUrl) ?: return@withContext ChapterContent.empty(chapterId)
             try {
+                currentImageHeader = source.getHeaderMap(true)
                 val (_, bookUrl) = parseId(bookId)
                 val book = Book(bookUrl = bookUrl, origin = sourceUrl, originName = source.bookSourceName)
                 val bookChapter = BookChapter(bookUrl = bookUrl, url = chapterUrl, title = "", index = 0)
