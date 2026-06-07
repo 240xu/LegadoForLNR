@@ -8,21 +8,23 @@ interface RuleDataInterface {
      */
     fun putVariable(key: String, value: String?): Boolean {
         val keyExist = variableMap.contains(key)
-        when {
+        return when {
             value == null -> {
                 variableMap.remove(key)
                 putBigVariable(key, null)
+                keyExist
             }
             value.length < 10000 -> {
                 putBigVariable(key, null)
                 variableMap[key] = value
+                true
             }
             else -> {
                 variableMap.remove(key)
                 putBigVariable(key, value)
+                keyExist
             }
         }
-        return keyExist
     }
 
     fun putVariable(value: String?): Boolean = putVariable("", value)

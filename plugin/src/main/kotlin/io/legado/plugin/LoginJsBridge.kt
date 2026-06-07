@@ -1,4 +1,4 @@
-﻿package io.legado.plugin
+package io.legado.plugin
 
 import android.app.Activity
 import android.app.Dialog
@@ -81,11 +81,18 @@ class LoginJsBridge(
         // 在 LoginActivity 中通过 Rhino 执行 login()
     }
 
-    /** source.getLoginInfo() */
+    /** source.getLoginInfo() - 对齐 lyc486 AES 解密 */
     fun getLoginInfo(): String? {
         return try {
             CacheManager.get("userInfo_$sourceUrl")?.let { cache ->
-                return try { String(java.util.Base64.getDecoder().decode(cache)) } catch (_: Exception) { cache }
+                return try {
+                    val key = io.legado.engine.constant.AppConst.androidId.encodeToByteArray().copyOf(16)
+                    val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
+                    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, javax.crypto.spec.SecretKeySpec(key, "AES"))
+                    String(cipher.doFinal(java.util.Base64.getDecoder().decode(cache)))
+                } catch (_: Exception) {
+                    try { String(java.util.Base64.getDecoder().decode(cache)) } catch (_: Exception) { cache }
+                }
             }
             val prefs = activityRef.get()?.getSharedPreferences("legado_login_info", android.content.Context.MODE_PRIVATE)
             prefs?.getString("info_$sourceUrl", null)

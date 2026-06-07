@@ -7,6 +7,7 @@ import io.legado.engine.constant.AppPattern
 import io.legado.engine.data.BaseSource
 import io.legado.engine.data.Book
 import io.legado.engine.data.BookChapter
+import io.legado.engine.data.BookSource
 import io.legado.engine.data.RuleDataInterface
 import io.legado.engine.http.CookieStore
 import io.legado.engine.http.HttpClient
@@ -18,6 +19,8 @@ import io.legado.engine.shim.CacheManager
 import io.legado.engine.shim.Debug
 import io.legado.engine.shim.GSON
 import io.legado.engine.webview.BackstageWebView
+import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Base64
@@ -309,11 +312,11 @@ class AnalyzeUrl(
     override fun getTag(): String? = source?.getTag()
 
     fun put(key: String, value: String): String {
-        chapter?.putVariable(key, value) ?: ruleData?.putVariable(key, value) ?: source?.put(key, value)
+        chapter?.putVariable(key, value); ruleData?.putVariable(key, value); source?.put(key, value)
         return value
     }
     fun put(value: String): String {
-        chapter?.putVariable(value) ?: ruleData?.putVariable(value) ?: source?.putVariable(value)
+        chapter?.putVariable(value); ruleData?.putVariable(value); source?.putVariable(value)
         return value
     }
     fun get(key: String): String {
@@ -329,6 +332,48 @@ class AnalyzeUrl(
     }
 
     fun isPost(): Boolean = method.equals("POST", true)
+
+    fun getResponse(): HttpResponse = runBlocking { execute() }
+    private fun getByteArrayIfDataUri(): ByteArray? {
+        if (!url.startsWith("data:", true)) return null
+        return decodeDataUrl(url)?.toByteArray()
+    }
+    fun getByteArray(): ByteArray {
+        getByteArrayIfDataUri()?.let { return it }
+        return runBlocking { getByteArrayAwait() }
+    }
+    fun getInputStream(): java.io.InputStream {
+        getByteArrayIfDataUri()?.let { return it.inputStream() }
+        return runBlocking { getInputStreamAwait() }
+    }
+    fun getClient(): OkHttpClient = HttpClient.clientFor(proxy, dnsIp, callTimeout)
+    fun executeStrRequest(jsStr: String? = null, sourceRegex: String? = null): StrResponse {
+        setCookie()
+        return try {
+            val raw = execute()
+            val strResp = StrResponse(raw)
+            val loginCheckJs = source?.let { (it as? BookSource)?.loginCheckJs }
+            if (!loginCheckJs.isNullOrBlank()) {
+                val checkResult = evalJS(loginCheckJs, strResp)
+                if (checkResult is StrResponse) checkResult else strResp
+            } else strResp
+        } catch (e: Exception) {
+            StrResponse(HttpResponse(url ?: "", e.message ?: "", 500))
+        }
+    }
+    fun encodeParams(params: String, charset: String?, isQuery: Boolean): String {
+        return try {
+            val c = if (charset.isNullOrEmpty()) "UTF-8" else charset
+            URLEncoder.encode(params, c)
+        } catch (_: Exception) { params }
+    }
+    fun analyzeQuery(query: String) {
+        encodedQuery = encodeParams(query, charset, true)
+    }
+    fun extractHostFromUrl(url: String): String? {
+        return try { java.net.URL(url).host } catch (_: Exception) { null }
+    }
+
     fun getHeaderMap(): Map<String, String> = headerMap
     fun setHeaders(value: String?) { value?.let { headerMap.putAll(UrlOptionParser.parseHeaderLines(it)) } }
     fun getBody(): String? = body
@@ -375,6 +420,7 @@ class AnalyzeUrl(
         }
         fun getAbsoluteURL(base: String, relative: String): String {
             if (relative.startsWith("data:", true)) return relative
+            if (relative.startsWith("javascript:", true)) return ""
             if (relative.startsWith("http://") || relative.startsWith("https://")) return relative
             return try { URL(URL(base), relative).toString() } catch (_: Exception) { relative }
         }

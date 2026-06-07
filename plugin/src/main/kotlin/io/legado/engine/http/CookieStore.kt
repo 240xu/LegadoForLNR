@@ -36,7 +36,7 @@ object CookieStore {
     fun getCookie(domain: String): String {
         val map = store[normalizeDomain(domain)] ?: return ""
         if (map.isEmpty()) return ""
-        return map.entries.joinToString("; ") { "=" }
+        return map.entries.joinToString("; ") { "${it.key}=${it.value}" }
     }
 
     fun getCookieHeader(url: String): Map<String, String> {

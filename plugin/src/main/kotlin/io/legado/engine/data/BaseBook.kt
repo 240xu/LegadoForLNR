@@ -25,9 +25,10 @@ interface BaseBook : RuleDataInterface {
      * 对齐 lyc486: putVariable 后同步写回 variable = GSON.toJson(variableMap)
      */
     override fun putVariable(key: String, value: String?): Boolean {
-        val result = super.putVariable(key, value)
-        variable = GSON.toJson(variableMap)
-        return result
+        if (super.putVariable(key, value)) {
+            variable = GSON.toJson(variableMap)
+        }
+        return true
     }
 
     override fun putVariable(value: String?): Boolean = putVariable("", value)

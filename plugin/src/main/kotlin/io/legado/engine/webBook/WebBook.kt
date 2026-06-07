@@ -9,6 +9,8 @@ import io.legado.engine.rule.AnalyzeRule
 import io.legado.engine.rule.AnalyzeUrl
 import io.legado.engine.js.SourceLoginCallback
 import io.legado.engine.shim.Debug
+import io.legado.engine.shim.GSON
+import io.legado.engine.shim.fromJsonObject
 
 object WebBook {
 
@@ -20,8 +22,8 @@ object WebBook {
     }
 
     /**
-     * 对齐 lyc486: 执行请求并检查 loginCheckJs
-     * loginCheckJs 作为后处理脚本，接收 StrResponse 作为 result
+     * Aligned with lyc486: execute request and check loginCheckJs
+     * loginCheckJs acts as post-processing script, receives StrResponse as result
      */
     fun executeWithLoginCheck(bookSource: BookSource, analyzeUrl: AnalyzeUrl): HttpResponse {
         applyRateLimit(bookSource)
@@ -49,11 +51,11 @@ object WebBook {
         return response
     }
 
-    // ==================== 对齐 lyc486: runPreUpdateJs 独立方法 ====================
+    // ==================== Aligned with lyc486: runPreUpdateJs standalone method ====================
 
     /**
-     * 对齐 lyc486 WebBook.runPreUpdateJs()
-     * 执行书源的 preUpdateJs 脚本
+     * Aligned with lyc486 WebBook.runPreUpdateJs()
+     * Execute book source preUpdateJs script
      */
     fun runPreUpdateJs(bookSource: BookSource, book: Book, isFromBookInfo: Boolean = false) {
         val rule = bookSource.getTocRule()
@@ -68,7 +70,7 @@ object WebBook {
         }
     }
 
-    // ==================== 搜索 ====================
+    // ==================== Search ====================
 
     fun searchBookAwait(bookSource: BookSource, key: String, page: Int? = 1): ArrayList<SearchBook> {
         val searchUrl = bookSource.searchUrl
@@ -79,11 +81,11 @@ object WebBook {
         return BookList.analyzeBookList(bookSource, analyzeUrl, res.url, res.body, rule, isSearch = true)
     }
 
-    // ==================== 对齐 lyc486: 精确搜索 ====================
+    // ==================== Aligned with lyc486: precise search ====================
 
     /**
-     * 对齐 lyc486 WebBook.preciseSearchAwait()
-     * 按书名+作者精确搜索，返回匹配的第一本书
+     * Aligned with lyc486 WebBook.preciseSearchAwait()
+     * Precise search by book name + author, returns first match
      */
     fun preciseSearchAwait(bookSource: BookSource, name: String, author: String): Book? {
         return try {
@@ -96,7 +98,7 @@ object WebBook {
         }
     }
 
-    // ==================== 发现 ====================
+    // ==================== Explore ====================
 
     fun exploreBookAwait(bookSource: BookSource, url: String, page: Int? = 1): ArrayList<SearchBook> {
         val analyzeUrl = AnalyzeUrl(mUrl = url, page = page, baseUrl = bookSource.bookSourceUrl, source = bookSource)
@@ -106,7 +108,7 @@ object WebBook {
         return BookList.analyzeBookList(bookSource, analyzeUrl, res.url, res.body, rule, isSearch = false)
     }
 
-    // ==================== 详情 ====================
+    // ==================== Detail ====================
 
     fun getBookInfoAwait(bookSource: BookSource, book: Book, canReName: Boolean = true): Book {
         val rule = bookSource.getBookInfoRule()
@@ -116,11 +118,11 @@ object WebBook {
         return book
     }
 
-    // ==================== 目录 ====================
+    // ==================== TOC ====================
 
     fun getChapterListAwait(bookSource: BookSource, book: Book): List<BookChapter> {
         val rule = bookSource.getTocRule()
-        // 对齐 lyc486: 使用独立 runPreUpdateJs
+        // Aligned with lyc486: use standalone runPreUpdateJs
         runPreUpdateJs(bookSource, book)
         val allChapters = mutableListOf<BookChapter>()
         var currentUrl: String? = book.tocUrl?.ifBlank { book.bookUrl } ?: book.bookUrl
@@ -140,7 +142,7 @@ object WebBook {
         return allChapters
     }
 
-    // ==================== 正文 ====================
+    // ==================== Content ====================
 
     fun getContentAwait(
         bookSource: BookSource,
@@ -150,18 +152,18 @@ object WebBook {
     ): String {
         val contentRule = bookSource.getContentRule()
         if (contentRule.content.isNullOrEmpty()) {
-            Debug.log(bookSource.bookSourceUrl, "正文规则为空,使用章节链接:${bookChapter.url}")
+            Debug.log(bookSource.bookSourceUrl, "Content rule is empty, using chapter url:${bookChapter.url}")
             return bookChapter.url
         }
-        // 对齐 lyc486: 一级目录不解析规则
+        // Aligned with lyc486: first-level TOC does not parse rules
         if (bookChapter.isVolume && bookChapter.url.startsWith(bookChapter.title)) {
-            Debug.log(bookSource.bookSourceUrl, "一级目录正文不解析规则")
+            Debug.log(bookSource.bookSourceUrl, "First-level TOC content does not parse rules")
             return bookChapter.tag ?: ""
         }
         val baseUrl = bookChapter.url
         val redirectUrl = baseUrl
         val body: String
-        // 对齐 lyc486: 当 chapterUrl == bookUrl 时使用 tocHtml
+        // Aligned with lyc486: use tocHtml when chapterUrl == bookUrl
         if (bookChapter.url == book.bookUrl && !book.tocHtml.isNullOrEmpty()) {
             body = book.tocHtml!!
         } else {
@@ -171,10 +173,10 @@ object WebBook {
                 try { Regex(contentRule.sourceRegex!!).find(res.body)?.value ?: res.body } catch (_: Exception) { res.body }
             } else res.body
         }
-        // 解析正文
+        // Parse content
         val ar = AnalyzeRule(source = bookSource).setContent(body, baseUrl)
         ar.setChapter(bookChapter)
-        // webJs 后处理
+        // webJs post-processing
         var processedBody = body
         if (!contentRule.webJs.isNullOrBlank()) {
             ar.evalJS(contentRule.webJs!!, body)?.toString()?.takeIf { it.isNotBlank() }?.let { webBody ->
@@ -183,9 +185,9 @@ object WebBook {
             }
         }
         val allParts = mutableListOf<String>()
-        // 主内容
+        // Main content
         allParts.addAll(ar.getStringList(contentRule.content ?: "") ?: emptyList())
-        // 副内容
+        // Sub content
         if (!contentRule.subContent.isNullOrBlank()) {
             val subContent = ar.getString(contentRule.subContent!!)
             if (subContent.isNotBlank()) {
@@ -199,7 +201,7 @@ object WebBook {
                 }
             }
         }
-        // 多页正文（nextContentUrl）
+        // Multi-page content (nextContentUrl)
         if (!contentRule.nextContentUrl.isNullOrBlank()) {
             val nextUrls = ar.getStringList(contentRule.nextContentUrl!!, isUrl = true) ?: emptyList()
             for (nextUrl in nextUrls) {
@@ -213,14 +215,14 @@ object WebBook {
             }
         }
         var contentStr = allParts.joinToString("\n")
-        // replaceRegex — 对齐 lyc486: 使用 analyzeRule.getString 执行替换规则
+        // replaceRegex - Aligned with lyc486: use analyzeRule.getString to execute replace rules
         if (!contentRule.replaceRegex.isNullOrBlank()) {
             try {
                 val replaced = ar.getString(contentRule.replaceRegex!!, contentStr)
                 if (replaced.isNotBlank()) contentStr = replaced
             } catch (_: Exception) {}
         }
-        // 对齐 lyc486: title 规则解析
+        // Aligned with lyc486: title rule parsing
         if (!contentRule.title.isNullOrBlank()) {
             try {
                 val title = ar.getString(contentRule.title!!)
@@ -230,7 +232,7 @@ object WebBook {
         return contentStr
     }
 
-    // ==================== 辅助：replaceRegex 应用 ====================
+    // ==================== Helper: replaceRegex application ====================
 
     fun applyReplaceRegex(text: String, replaceRules: String): String {
         var result = text
@@ -260,7 +262,7 @@ object BookList {
         val books = ArrayList<SearchBook>()
         try {
             val ar = AnalyzeRule(source = bookSource).setContent(body, baseUrl)
-            // 对齐 lyc486: 支持 -/+ 前缀反转列表
+            // Aligned with lyc486: support -/+ prefix list reversal
             var listRule = rule.bookList ?: ""
             var reverse = false
             if (listRule.startsWith("-")) { reverse = true; listRule = listRule.substring(1) }
@@ -335,8 +337,8 @@ object BookChapterList {
     private val wordCountRegex = Regex("(?:^|[\\u5B57\\u6570\\u3010\\u3011\\uFF0C\\u3001\\uFF0C]|\\s+)([0-9\\u4E07\\u5343\\u767E\\u5341\\.]{1,6}\\u5B57)")
 
     /**
-     * 对齐 lyc486 BookChapterList.analyzeChapterList()
-     * 支持 -/+ 前缀反转、isVolume/vip/pay 规则解析、upChapterInfo 持久化
+     * Aligned with lyc486 BookChapterList.analyzeChapterList()
+     * Support -/+ prefix reversal, isVolume/vip/pay rule parsing, upChapterInfo persistence
      */
     fun analyzeChapterList(
         bookSource: BookSource,
@@ -348,7 +350,7 @@ object BookChapterList {
         val chapters = mutableListOf<BookChapter>()
         try {
             val ar = AnalyzeRule(source = bookSource).setContent(body, baseUrl)
-            // 对齐 lyc486: 支持 -/+ 前缀
+            // Aligned with lyc486: support -/+ prefix
             var listRule = rule.chapterList ?: ""
             var reverse = false
             if (listRule.startsWith("-")) { reverse = true; listRule = listRule.substring(1) }
@@ -372,7 +374,7 @@ object BookChapterList {
                     }
                     val info = itemAr.getString(rule.updateTime ?: "").trim()
                     val ch = BookChapter(bookUrl = book.bookUrl, url = absUrl, title = finalTitle.ifBlank { "unknown" }, index = index, baseUrl = baseUrl)
-                    // 对齐 lyc486: isVolume 解析
+                    // Aligned with lyc486: isVolume parsing
                     if (!rule.isVolume.isNullOrBlank()) {
                         val isVolumeStr = itemAr.getString(rule.isVolume!!)
                         if (isVolumeStr == "true" || isVolumeStr == "1") {
@@ -380,7 +382,7 @@ object BookChapterList {
                             ch.tag = info
                         }
                     }
-                    // 对齐 lyc486: isVip / isPay 解析
+                    // Aligned with lyc486: isVip / isPay parsing
                     if (!rule.isVip.isNullOrBlank()) {
                         val vipStr = itemAr.getString(rule.isVip!!)
                         if (vipStr == "true" || vipStr == "1") ch.isVip = true
@@ -401,6 +403,24 @@ object BookChapterList {
                 } catch (_: Exception) {}
             }
         } catch (e: Exception) { Debug.log("BookChapterList error: " + e.message) }
+        upChapterInfo(chapters, book)
         return chapters
+    }
+
+    private fun upChapterInfo(list: List<BookChapter>, book: Book) {
+        for (ch in list) {
+            val cacheKey = "chInfo_${book.bookUrl}_${ch.index}_${ch.title}"
+            val cached: String? = io.legado.engine.shim.CacheManager.get(cacheKey)
+            if (cached != null) {
+                try {
+                    val map: Map<String, String>? = io.legado.engine.shim.GSON.fromJsonObject(cached)
+                    if (map != null) {
+                        map["wordCount"]?.let { v -> ch.wordCount = v }
+                        map["variable"]?.let { v -> ch.variable = v }
+                        map["imgUrl"]?.let { v -> ch.imgUrl = v }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
     }
 }

@@ -772,16 +772,11 @@ object SourceLoginCallback {
             Base64.getEncoder().encodeToString(SymmetricCryptoHelper("DESede/$mode/$padding", keyBytes, ivBytes).encrypt(data))
         } catch (_: Exception) { null }
     }
-    fun createAsymmetricCrypto(transformation: String, key: String): Any? {
-        return try {
-            val keyBytes = Base64.getDecoder().decode(key)
-            val keySpec = java.security.spec.X509EncodedKeySpec(keyBytes)
-            val keyFactory = java.security.KeyFactory.getInstance(transformation.split("/")[0])
-            keyFactory.generatePublic(keySpec)
-        } catch (_: Exception) { null }
+    fun createAsymmetricCrypto(transformation: String): AsymmetricCryptoHelper {
+        return AsymmetricCryptoHelper(transformation)
     }
-    fun createSign(algorithm: String): java.security.Signature? {
-        return try { java.security.Signature.getInstance(algorithm) } catch (_: Exception) { null }
+    fun createSign(algorithm: String): SignHelper {
+        return SignHelper(algorithm)
     }
 
 class SymmetricCryptoHelper(
@@ -828,5 +823,120 @@ class SymmetricCryptoHelper(
 
     fun encryptHex(data: String): String {
         return encrypt(data).joinToString("") { "%02x".format(it) }
+    }
+}
+
+/**
+ * 对齐 lyc486 hutool AsymmetricCrypto API
+ * 在 JS 中: java.createAsymmetricCrypto("RSA").setPublicKey(key).encryptBase64(data)
+ */
+@Suppress("unused")
+class AsymmetricCryptoHelper(private val algorithm: String) {
+    private var publicKey: java.security.PublicKey? = null
+    private var privateKey: java.security.PrivateKey? = null
+    private val keyFactory = java.security.KeyFactory.getInstance(algorithm.split("/")[0])
+
+    fun setPublicKey(key: ByteArray): AsymmetricCryptoHelper {
+        publicKey = keyFactory.generatePublic(java.security.spec.X509EncodedKeySpec(key))
+        return this
+    }
+    fun setPublicKey(key: String): AsymmetricCryptoHelper = setPublicKey(Base64.getDecoder().decode(key))
+    fun setPrivateKey(key: ByteArray): AsymmetricCryptoHelper {
+        privateKey = keyFactory.generatePrivate(java.security.spec.PKCS8EncodedKeySpec(key))
+        return this
+    }
+    fun setPrivateKey(key: String): AsymmetricCryptoHelper = setPrivateKey(Base64.getDecoder().decode(key))
+
+    private fun getCipher(): Cipher = Cipher.getInstance(algorithm)
+
+    fun encrypt(data: ByteArray, usePublicKey: Boolean = true): ByteArray {
+        val cipher = getCipher()
+        val key = if (usePublicKey) publicKey else privateKey
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        return cipher.doFinal(data)
+    }
+    fun encrypt(data: String, usePublicKey: Boolean = true): ByteArray = encrypt(data.toByteArray(), usePublicKey)
+    fun encryptBase64(data: Any, usePublicKey: Boolean = true): String {
+        val bytes = when (data) {
+            is ByteArray -> data
+            is String -> data.toByteArray()
+            else -> data.toString().toByteArray()
+        }
+        return Base64.getEncoder().encodeToString(encrypt(bytes, usePublicKey))
+    }
+    fun encryptHex(data: Any, usePublicKey: Boolean = true): String {
+        val bytes = when (data) {
+            is ByteArray -> data
+            is String -> data.toByteArray()
+            else -> data.toString().toByteArray()
+        }
+        return encrypt(bytes, usePublicKey).joinToString("") { "%02x".format(it) }
+    }
+
+    fun decrypt(data: ByteArray, usePublicKey: Boolean = false): ByteArray {
+        val cipher = getCipher()
+        val key = if (usePublicKey) publicKey else privateKey
+        cipher.init(Cipher.DECRYPT_MODE, key)
+        return cipher.doFinal(data)
+    }
+    fun decrypt(data: String, usePublicKey: Boolean = false): ByteArray {
+        val bytes = try { Base64.getDecoder().decode(data) } catch (_: Exception) { data.toByteArray() }
+        return decrypt(bytes, usePublicKey)
+    }
+    fun decryptStr(data: Any, usePublicKey: Boolean = false): String {
+        val bytes = when (data) {
+            is ByteArray -> data
+            is String -> decrypt(data, usePublicKey)
+            else -> data.toString().toByteArray()
+        }
+        return String(if (data is ByteArray) decrypt(data, usePublicKey) else bytes)
+    }
+}
+
+/**
+ * 对齐 lyc486 hutool Sign API
+ * 在 JS 中: java.createSign("SHA256withRSA").setPublicKey(key).verifyHex(data, signHex)
+ */
+@Suppress("unused")
+class SignHelper(private val algorithm: String) {
+    private var publicKey: java.security.PublicKey? = null
+    private var privateKey: java.security.PrivateKey? = null
+
+    fun setPublicKey(key: ByteArray): SignHelper {
+        val keyFactory = java.security.KeyFactory.getInstance(algorithm.replace(Regex("(?i)with.+$"), ""))
+        publicKey = keyFactory.generatePublic(java.security.spec.X509EncodedKeySpec(key))
+        return this
+    }
+    fun setPublicKey(key: String): SignHelper = setPublicKey(Base64.getDecoder().decode(key))
+    fun setPrivateKey(key: ByteArray): SignHelper {
+        val keyFactory = java.security.KeyFactory.getInstance(algorithm.replace(Regex("(?i)with.+$"), ""))
+        privateKey = keyFactory.generatePrivate(java.security.spec.PKCS8EncodedKeySpec(key))
+        return this
+    }
+    fun setPrivateKey(key: String): SignHelper = setPrivateKey(Base64.getDecoder().decode(key))
+
+    fun sign(data: ByteArray): ByteArray {
+        val sig = java.security.Signature.getInstance(algorithm)
+        sig.initSign(privateKey)
+        sig.update(data)
+        return sig.sign()
+    }
+    fun sign(data: String): ByteArray = sign(data.toByteArray())
+    fun signHex(data: String): String = sign(data).joinToString("") { "%02x".format(it) }
+    fun signBase64(data: String): String = Base64.getEncoder().encodeToString(sign(data))
+
+    fun verify(data: ByteArray, signature: ByteArray): Boolean {
+        val sig = java.security.Signature.getInstance(algorithm)
+        sig.initVerify(publicKey)
+        sig.update(data)
+        return sig.verify(signature)
+    }
+    fun verify(data: String, signatureHex: String): Boolean {
+        val sigBytes = signatureHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        return verify(data.toByteArray(), sigBytes)
+    }
+    fun verify(data: String, signatureBase64: String, @Suppress("UNUSED_PARAMETER") base64: Boolean): Boolean {
+        val sigBytes = Base64.getDecoder().decode(signatureBase64)
+        return verify(data.toByteArray(), sigBytes)
     }
 }

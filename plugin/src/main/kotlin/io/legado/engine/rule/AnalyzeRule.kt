@@ -19,6 +19,7 @@ import io.legado.engine.shim.Debug
 import io.legado.engine.shim.GSON
 import io.legado.engine.shim.fromJsonArray
 import io.legado.engine.shim.fromJsonObject
+import org.apache.commons.text.StringEscapeUtils
 import org.mozilla.javascript.NativeArray
 import org.mozilla.javascript.NativeObject
 import com.script.rhino.CompiledScript
@@ -90,7 +91,7 @@ class AnalyzeRule(
     }
 
     /**
-     * 分解规则生成规则列表 (带allInOne参数)
+     * Split rule string into rule list (with allInOne parameter)
      */
     fun splitSourceRule(ruleStr: String?, allInOne: Boolean = false): List<SourceRule> {
         if (ruleStr.isNullOrEmpty()) return emptyList()
@@ -104,14 +105,9 @@ class AnalyzeRule(
         val jsMatcher = AppPattern.JS_PATTERN.matcher(ruleStr)
         while (jsMatcher.find()) {
             if (jsMatcher.start() > start) { tmp = ruleStr.substring(start, jsMatcher.start()).trim(); if (tmp.isNotEmpty()) ruleList.add(SourceRule(tmp, mMode)) }
-            ruleList.add(SourceRule(jsMatcher.group(2) ?: jsMatcher.group(1) ?: "", Mode.Js)); start = jsMatcher.end()
+            ruleList.add(SourceRule(jsMatcher.group(), mMode)); start = jsMatcher.end()
         }
-        val webJsMatcher = AppPattern.WebJS_PATTERN.matcher(ruleStr)
-        while (webJsMatcher.find()) {
-            if (webJsMatcher.start() > start) { tmp = ruleStr.substring(start, webJsMatcher.start()).trim(); if (tmp.isNotEmpty()) ruleList.add(SourceRule(tmp, mMode)) }
-            ruleList.add(SourceRule(webJsMatcher.group(2) ?: webJsMatcher.group(1) ?: "", Mode.WebJs)); start = webJsMatcher.end()
-        }
-        if (ruleStr.length > start) { tmp = ruleStr.substring(start).trim(); if (tmp.isNotEmpty()) ruleList.add(SourceRule(tmp, mMode)) }
+        if (start < ruleStr.length) { tmp = ruleStr.substring(start).trim(); if (tmp.isNotEmpty()) ruleList.add(SourceRule(tmp, mMode)) }
         return ruleList
     }
 
@@ -168,11 +164,6 @@ class AnalyzeRule(
         return getString(splitSourceRuleCacheString(ruleStr), mContent, isUrl)
     }
 
-
-    /**
-     * 获取文本 - 带 mContent 参数的重载
-     * 对应 Legado 的 getString(mContent, ruleStr, isUrl)
-     */
     fun getStringFrom(mContent: Any?, ruleStr: String?, isUrl: Boolean = false): String {
         return getString(ruleStr, mContent, isUrl)
     }
@@ -181,7 +172,7 @@ class AnalyzeRule(
         return getString(ruleStr as String?, null, false)
     }
 
-        fun getString(ruleStr: String?, unescape: Boolean): String {
+    fun getString(ruleStr: String?, unescape: Boolean): String {
         if (ruleStr.isNullOrEmpty()) return ""
         return getString(splitSourceRuleCacheString(ruleStr), null, false)
     }
@@ -216,13 +207,9 @@ class AnalyzeRule(
         if (result == null) return ""
         val str = result.toString()
         if (isUrl && str.isNotBlank()) { return AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), str) }
-        return str
+        return StringEscapeUtils.unescapeHtml4(str)
     }
 
-
-    /**
-     * 获取单个Element
-     */
     fun getElement(ruleStr: String): Any? {
         if (ruleStr.isEmpty()) return null
         var result: Any? = content ?: return null
@@ -295,7 +282,7 @@ class AnalyzeRule(
         } else {
             RhinoScriptEngine.getRuntimeScope(bindings).also {
                 if (evalJSCallCount++ > 16) {
-                    // 防止递归过深导致栈溢出
+                    // Prevent excessive recursion
                 }
             }
         }
@@ -370,6 +357,10 @@ class AnalyzeRule(
         }
     }
 
+    /**
+     * lyc486 SourceRule pattern: uses evalPattern to split rules into
+     * ruleParam/ruleType pairs, where ruleType encodes the substitution type.
+     */
     inner class SourceRule(ruleStr: String, initialMode: Mode = Mode.Default) {
         var rule: String = ""
         var mode: Mode = initialMode
@@ -377,6 +368,9 @@ class AnalyzeRule(
         var replacement: String = ""
         var replaceFirst: Boolean = false
         val putMap = HashMap<String, String>()
+
+        val ruleParam = ArrayList<String>()
+        val ruleType = ArrayList<Int>()
 
         init {
             var r = ruleStr
@@ -387,7 +381,7 @@ class AnalyzeRule(
                 r.startsWith("@CSS:", true) -> { mode = Mode.Default }
                 r.startsWith("@@") -> { mode = Mode.Default; r = r.substring(2) }
                 isJSON || r.startsWith("$.") || r.startsWith("$[") -> mode = Mode.Json
-                r.startsWith("//") -> mode = Mode.XPath
+                r.startsWith("/") -> mode = Mode.XPath
             }
             r = splitPutRule(r, putMap)
             val parts = r.split("##")
@@ -395,31 +389,110 @@ class AnalyzeRule(
             if (parts.size > 1) replaceRegex = parts[1]
             if (parts.size > 2) replacement = parts[2]
             if (parts.size > 3) replaceFirst = true
-        }
 
-        fun makeUpRule(analyzer: AnalyzeRule, currentResult: Any?) {
-            rule = replaceGetAndJs(rule, analyzer, currentResult)
-        }
-
-        fun getParamSize(): Int = 1
-
-        private fun replaceGetAndJs(ruleStr: String, analyzer: AnalyzeRule, currentResult: Any?): String {
-            val sb = StringBuilder()
-            var i = 0
-            while (i < ruleStr.length) {
-                when {
-                    ruleStr.startsWith("@get:{", i) -> { val end = ruleStr.indexOf("}", i + 6); if (end > 0) { sb.append(analyzer.get(ruleStr.substring(i + 6, end))); i = end + 1 } else { sb.append(ruleStr[i]); i++ } }
-                    ruleStr.startsWith("{{", i) -> { val end = ruleStr.indexOf("}}", i + 2); if (end > 0) { val inner = ruleStr.substring(i + 2, end); val jsResult = if (inner.startsWith("$.") || inner.startsWith("$[")) analyzer.getString(inner, currentResult) else analyzer.evalJS(inner, currentResult); when (jsResult) { is Double -> if (jsResult % 1.0 == 0.0) sb.append("%.0f".format(jsResult)) else sb.append(jsResult); else -> sb.append(jsResult?.toString() ?: "") }; i = end + 2 } else { sb.append(ruleStr[i]); i++ } }
-                    else -> { sb.append(ruleStr[i]); i++ }
+            // lyc486 evalPattern splitting: match @get:{...} and {{...}} patterns
+            val evalMatcher = evalPattern.matcher(rule)
+            var lastEnd = 0
+            while (evalMatcher.find()) {
+                // Text before the match
+                if (evalMatcher.start() > lastEnd) {
+                    val textBefore = rule.substring(lastEnd, evalMatcher.start())
+                    if (textBefore.isNotEmpty()) {
+                        val splitParts = textBefore.split(splitRegex)
+                        for (sp in splitParts) {
+                            if (sp.isNotEmpty()) {
+                                ruleParam.add(sp)
+                                ruleType.add(0) // plain text
+                            }
+                        }
+                    }
+                }
+                val matched = evalMatcher.group()
+                if (matched != null) {
+                    when {
+                        matched.startsWith("@get:") -> {
+                            val inner = matched.substring(6).removeSurrounding("{", "}")
+                            ruleParam.add(inner)
+                            ruleType.add(-2) // @get variable
+                        }
+                        matched.startsWith("{{") -> {
+                            val inner = matched.removeSurrounding("{{", "}}")
+                            ruleParam.add(inner)
+                            ruleType.add(-1) // JS expression or sub-rule
+                        }
+                    }
+                }
+                lastEnd = evalMatcher.end()
+            }
+            // Trailing text after last match
+            if (lastEnd < rule.length) {
+                val textAfter = rule.substring(lastEnd)
+                if (textAfter.isNotEmpty()) {
+                    val splitParts = textAfter.split(splitRegex)
+                    for (sp in splitParts) {
+                        if (sp.isNotEmpty()) {
+                            ruleParam.add(sp)
+                            ruleType.add(0)
+                        }
+                    }
                 }
             }
-            return sb.toString()
+        }
+
+        fun getParamSize(): Int = ruleParam.size
+
+        fun makeUpRule(analyzer: AnalyzeRule, currentResult: Any?) {
+            if (ruleParam.isEmpty()) return
+            val sb = StringBuilder()
+            for (i in ruleParam.indices) {
+                val type = ruleType[i]
+                val param = ruleParam[i]
+                when {
+                    type > 0 -> {
+                        // Regex capture group replacement
+                        sb.append(type)
+                    }
+                    type == -1 -> {
+                        // JS expression or sub-rule in {{...}}
+                        if (isRule(param)) {
+                            val subResult = analyzer.getString(param, currentResult)
+                            sb.append(subResult)
+                        } else {
+                            val jsResult = analyzer.evalJS(param, currentResult)
+                            when (jsResult) {
+                                is Double -> if (jsResult % 1.0 == 0.0) sb.append("%.0f".format(jsResult)) else sb.append(jsResult)
+                                else -> sb.append(jsResult?.toString() ?: "")
+                            }
+                        }
+                    }
+                    type == -2 -> {
+                        // @get:{variable}
+                        sb.append(analyzer.get(param))
+                    }
+                    else -> {
+                        // Plain text (type == 0)
+                        sb.append(param)
+                    }
+                }
+            }
+            rule = sb.toString()
+        }
+
+        private fun isRule(ruleStr: String): Boolean {
+            return ruleStr.startsWith("@") || ruleStr.startsWith("$.") || ruleStr.startsWith("//")
         }
 
         private fun splitPutRule(rule: String, putMap: HashMap<String, String>): String {
             val regex = Regex("@put:\\{([^}]+?)\\}", RegexOption.IGNORE_CASE)
             var result = rule
-            regex.findAll(rule).forEach { match -> val content = match.groupValues[1]; val eqIdx = content.indexOf("="); if (eqIdx > 0) putMap[content.substring(0, eqIdx).trim()] = content.substring(eqIdx + 1).trim(); result = result.replace(match.value, "") }
+            regex.findAll(rule).forEach { match ->
+                val content = match.groupValues[1]
+                val eqIdx = content.indexOf("=")
+                if (eqIdx > 0) {
+                    putMap[content.substring(0, eqIdx).trim()] = content.substring(eqIdx + 1).trim()
+                }
+                result = result.replace(match.value, "")
+            }
             return result
         }
     }
@@ -427,8 +500,8 @@ class AnalyzeRule(
     enum class Mode { XPath, Json, Default, Js, Regex, WebJs }
 
     /**
-     * 对齐 lyc486 AnalyzeRule.reGetBook()
-     * 使用 preciseSearchAwait 按书名+作者精确匹配
+     * lyc486 AnalyzeRule.reGetBook()
+     * Precise search by book name + author
      */
     fun reGetBook() {
         if (!preUpdateJs) throw AssertionError("only callable in preUpdateJs context")
@@ -452,6 +525,14 @@ class AnalyzeRule(
     }
 
     companion object {
+        // lyc486 evalPattern: matches @get:{...} and {{...}}
+        private val evalPattern: java.util.regex.Pattern = java.util.regex.Pattern.compile(
+            "@get:\\{[^}]+?\\}|\\{\\{[\\w\\W]*?\\}\\}"
+        )
+
+        // lyc486 splitRegex: captures $1/$2 groups for regex rule reconstruction
+        private val splitRegex = Regex("(?<=\\$[12])(?=\\D)|(?<=\\D)(?=\\$[12])")
+
         private fun unwrapJs(jsStr: String): String {
             return when {
                 jsStr.startsWith("@js:", true) -> jsStr.substring(4)
@@ -461,6 +542,18 @@ class AnalyzeRule(
                 else -> jsStr
             }
         }
+
+        private const val SINGLE_SOURCE_RULE_CACHE_MAX = 512
+
+        fun getOrCreateSingleSourceRule(cache: HashMap<String, List<SourceRule>>, key: String, creator: () -> List<SourceRule>): List<SourceRule> {
+            return cache.getOrPut(key) { creator() }.also {
+                if (cache.size > SINGLE_SOURCE_RULE_CACHE_MAX) {
+                    val oldest = cache.keys.first()
+                    cache.remove(oldest)
+                }
+            }
+        }
+
         fun AnalyzeRule.setCoroutineContext(context: kotlin.coroutines.CoroutineContext): AnalyzeRule {
             this.coroutineContext = context
             return this

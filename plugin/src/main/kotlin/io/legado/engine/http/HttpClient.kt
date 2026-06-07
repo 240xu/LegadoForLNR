@@ -27,11 +27,12 @@ object HttpClient {
             .sslSocketFactory(SSLHelper.unsafeSSLSocketFactory, SSLHelper.unsafeTrustManager)
             .hostnameVerifier(SSLHelper.unsafeHostnameVerifier)
             .connectionSpecs(specs)
+            .addInterceptor(DecompressInterceptor)
             .addInterceptor { chain ->
                 val request = chain.request()
                 val builder = request.newBuilder()
                 if (request.header("User-Agent") == null) {
-                    builder.addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    builder.addHeader("User-Agent", "io.legado.engine.shim.AppConfig.userAgent")
                 }
                 builder.addHeader("Keep-Alive", "300")
                 builder.addHeader("Connection", "Keep-Alive")
@@ -158,7 +159,7 @@ object HttpClient {
         merged.putAll(CookieStore.getCookieHeader(url))
         merged.putAll(custom)
         if (!merged.containsKey("User-Agent") && !merged.containsKey("user-agent")) {
-            merged["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            merged["User-Agent"] = "io.legado.engine.shim.AppConfig.userAgent"
         }
         return merged
     }
@@ -171,7 +172,7 @@ object HttpClient {
         }
     }
 
-    private fun clientFor(proxy: String?, dnsIp: String?, timeoutMillis: Long?): OkHttpClient {
+    internal fun clientFor(proxy: String?, dnsIp: String?, timeoutMillis: Long?): OkHttpClient {
         if (proxy.isNullOrBlank() && dnsIp.isNullOrBlank() && timeoutMillis == null) return client
         val builder = client.newBuilder()
         if (timeoutMillis != null && timeoutMillis > 0) {
