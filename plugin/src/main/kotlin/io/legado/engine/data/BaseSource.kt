@@ -1,4 +1,4 @@
-﻿package io.legado.engine.data
+package io.legado.engine.data
 
 import com.script.ScriptBindings
 import com.script.buildScriptBindings

@@ -4,6 +4,7 @@ import io.legado.engine.data.*
 import io.legado.engine.data.rule.ContentRule
 import io.legado.engine.http.ConcurrentRateLimiter
 import io.legado.engine.http.HttpResponse
+import io.legado.engine.http.StrResponse
 import io.legado.engine.rule.AnalyzeRule
 import io.legado.engine.rule.AnalyzeUrl
 import io.legado.engine.js.SourceLoginCallback
@@ -18,33 +19,56 @@ object WebBook {
         }
     }
 
+    /**
+     * 对齐 lyc486: 执行请求并检查 loginCheckJs
+     * loginCheckJs 作为后处理脚本，接收 StrResponse 作为 result
+     */
     fun executeWithLoginCheck(bookSource: BookSource, analyzeUrl: AnalyzeUrl): HttpResponse {
         applyRateLimit(bookSource)
         val loginCheckJs = bookSource.loginCheckJs
         val response = try {
             val raw = analyzeUrl.execute()
             if (!loginCheckJs.isNullOrBlank()) {
-                // 对齐 lyc486: loginCheckJs 作为后处理脚本，接收 StrResponse 作为 result
-                val strResp = io.legado.engine.http.StrResponse(raw)
+                val strResp = StrResponse(raw)
                 val checkResult = analyzeUrl.evalJS(loginCheckJs, strResp)
-                if (checkResult is io.legado.engine.http.StrResponse) HttpResponse(checkResult.url, checkResult.body(), checkResult.code)
+                if (checkResult is StrResponse) HttpResponse(checkResult.url, checkResult.body ?: "", checkResult.code)
                 else raw
             } else raw
         } catch (throwable: Throwable) {
             if (!loginCheckJs.isNullOrBlank()) {
-                // 对齐 lyc486: 请求异常时也执行 loginCheckJs，传入错误响应
                 try {
-                    val errResp = io.legado.engine.http.StrResponse(HttpResponse(analyzeUrl.url, throwable.message ?: "", 500))
+                    val errResp = StrResponse(HttpResponse(analyzeUrl.url, throwable.message ?: "", 500))
                     val checkResult = analyzeUrl.evalJS(loginCheckJs, errResp)
-                    if (checkResult is io.legado.engine.http.StrResponse) {
+                    if (checkResult is StrResponse) {
                         if (checkResult.code == 500) throw throwable
-                        HttpResponse(checkResult.url, checkResult.body(), checkResult.code)
+                        HttpResponse(checkResult.url, checkResult.body ?: "", checkResult.code)
                     } else throw throwable
                 } catch (_: Throwable) { throw throwable }
             } else throw throwable
         }
         return response
     }
+
+    // ==================== 对齐 lyc486: runPreUpdateJs 独立方法 ====================
+
+    /**
+     * 对齐 lyc486 WebBook.runPreUpdateJs()
+     * 执行书源的 preUpdateJs 脚本
+     */
+    fun runPreUpdateJs(bookSource: BookSource, book: Book, isFromBookInfo: Boolean = false) {
+        val rule = bookSource.getTocRule()
+        if (!rule.preUpdateJs.isNullOrBlank()) {
+            try {
+                val ar = AnalyzeRule(ruleData = book, source = bookSource, preUpdateJs = true)
+                ar.setFromBookInfo(isFromBookInfo)
+                ar.evalJS(rule.preUpdateJs!!)
+            } catch (e: Exception) {
+                Debug.log(bookSource.bookSourceUrl, "preUpdateJs error: ${e.message}")
+            }
+        }
+    }
+
+    // ==================== 搜索 ====================
 
     fun searchBookAwait(bookSource: BookSource, key: String, page: Int? = 1): ArrayList<SearchBook> {
         val searchUrl = bookSource.searchUrl
@@ -55,6 +79,25 @@ object WebBook {
         return BookList.analyzeBookList(bookSource, analyzeUrl, res.url, res.body, rule, isSearch = true)
     }
 
+    // ==================== 对齐 lyc486: 精确搜索 ====================
+
+    /**
+     * 对齐 lyc486 WebBook.preciseSearchAwait()
+     * 按书名+作者精确搜索，返回匹配的第一本书
+     */
+    fun preciseSearchAwait(bookSource: BookSource, name: String, author: String): Book? {
+        return try {
+            val results = searchBookAwait(bookSource, name)
+            val matched = results.firstOrNull { it.name == name && it.author == author }
+            matched?.toBook()
+        } catch (e: Exception) {
+            Debug.log(bookSource.bookSourceUrl, "preciseSearch error: ${e.message}")
+            null
+        }
+    }
+
+    // ==================== 发现 ====================
+
     fun exploreBookAwait(bookSource: BookSource, url: String, page: Int? = 1): ArrayList<SearchBook> {
         val analyzeUrl = AnalyzeUrl(mUrl = url, page = page, baseUrl = bookSource.bookSourceUrl, source = bookSource)
         val res = executeWithLoginCheck(bookSource, analyzeUrl)
@@ -62,6 +105,8 @@ object WebBook {
         val rule = if (exploreRule.bookList.isNullOrBlank()) bookSource.getSearchRule() else exploreRule
         return BookList.analyzeBookList(bookSource, analyzeUrl, res.url, res.body, rule, isSearch = false)
     }
+
+    // ==================== 详情 ====================
 
     fun getBookInfoAwait(bookSource: BookSource, book: Book, canReName: Boolean = true): Book {
         val rule = bookSource.getBookInfoRule()
@@ -71,12 +116,12 @@ object WebBook {
         return book
     }
 
+    // ==================== 目录 ====================
+
     fun getChapterListAwait(bookSource: BookSource, book: Book): List<BookChapter> {
         val rule = bookSource.getTocRule()
-        if (!rule.preUpdateJs.isNullOrBlank()) {
-            try { AnalyzeRule(ruleData = book, source = bookSource, preUpdateJs = true).evalJS(rule.preUpdateJs!!) }
-            catch (e: Exception) { Debug.log("preUpdateJs error: " + e.message) }
-        }
+        // 对齐 lyc486: 使用独立 runPreUpdateJs
+        runPreUpdateJs(bookSource, book)
         val allChapters = mutableListOf<BookChapter>()
         var currentUrl: String? = book.tocUrl?.ifBlank { book.bookUrl } ?: book.bookUrl
         var pageCount = 0
@@ -95,7 +140,14 @@ object WebBook {
         return allChapters
     }
 
-    fun getContentAwait(bookSource: BookSource, book: Book, bookChapter: BookChapter, nextChapterUrl: String? = null): String {
+    // ==================== 正文 ====================
+
+    fun getContentAwait(
+        bookSource: BookSource,
+        book: Book,
+        bookChapter: BookChapter,
+        nextChapterUrl: String? = null
+    ): String {
         val contentRule = bookSource.getContentRule()
         if (contentRule.content.isNullOrEmpty()) {
             Debug.log(bookSource.bookSourceUrl, "正文规则为空,使用章节链接:${bookChapter.url}")
@@ -140,7 +192,7 @@ object WebBook {
                 if (subContent.startsWith("http", true)) {
                     try {
                         val subRes = AnalyzeUrl(mUrl = subContent, source = bookSource, ruleData = book).getStrResponse()
-                        allParts.add(subRes.body)
+                        allParts.add(subRes.body ?: "")
                     } catch (_: Exception) {}
                 } else {
                     allParts.add(subContent)
@@ -153,9 +205,9 @@ object WebBook {
             for (nextUrl in nextUrls) {
                 if (nextUrl.isBlank() || nextUrl == baseUrl) continue
                 try {
-                    val absUrl = io.legado.engine.rule.AnalyzeUrl.getAbsoluteURL(redirectUrl, nextUrl)
+                    val absUrl = AnalyzeUrl.getAbsoluteURL(redirectUrl, nextUrl)
                     val nextRes = AnalyzeUrl(mUrl = absUrl, source = bookSource, ruleData = book, chapter = bookChapter).getStrResponse()
-                    val nextAr = AnalyzeRule(source = bookSource).setContent(nextRes.body, nextRes.url).setChapter(bookChapter)
+                    val nextAr = AnalyzeRule(source = bookSource).setContent(nextRes.body ?: "", nextRes.url).setChapter(bookChapter)
                     allParts.addAll(nextAr.getStringList(contentRule.content ?: "") ?: emptyList())
                 } catch (_: Exception) {}
             }
@@ -163,10 +215,12 @@ object WebBook {
         var contentStr = allParts.joinToString("\n")
         // replaceRegex — 对齐 lyc486: 使用 analyzeRule.getString 执行替换规则
         if (!contentRule.replaceRegex.isNullOrBlank()) {
-            contentStr = contentStr.split("\n").joinToString("\n") { it.trim() }
-            contentStr = ar.getString(contentRule.replaceRegex!!, contentStr as Any)
+            try {
+                val replaced = ar.getString(contentRule.replaceRegex!!, contentStr)
+                if (replaced.isNotBlank()) contentStr = replaced
+            } catch (_: Exception) {}
         }
-        // title 解析
+        // 对齐 lyc486: title 规则解析
         if (!contentRule.title.isNullOrBlank()) {
             try {
                 val title = ar.getString(contentRule.title!!)
@@ -175,6 +229,8 @@ object WebBook {
         }
         return contentStr
     }
+
+    // ==================== 辅助：replaceRegex 应用 ====================
 
     fun applyReplaceRegex(text: String, replaceRules: String): String {
         var result = text
@@ -190,13 +246,28 @@ object WebBook {
     }
 }
 
+// ==================== BookList ====================
+
 object BookList {
-    fun analyzeBookList(bookSource: BookSource, analyzeUrl: AnalyzeUrl, baseUrl: String, body: String, rule: io.legado.engine.data.rule.BookListRule, isSearch: Boolean): ArrayList<SearchBook> {
+    fun analyzeBookList(
+        bookSource: BookSource,
+        analyzeUrl: AnalyzeUrl,
+        baseUrl: String,
+        body: String,
+        rule: io.legado.engine.data.rule.BookListRule,
+        isSearch: Boolean
+    ): ArrayList<SearchBook> {
         val books = ArrayList<SearchBook>()
         try {
             val ar = AnalyzeRule(source = bookSource).setContent(body, baseUrl)
-            val elements = ar.getElements(rule.bookList ?: "")
-            for (element in elements) {
+            // 对齐 lyc486: 支持 -/+ 前缀反转列表
+            var listRule = rule.bookList ?: ""
+            var reverse = false
+            if (listRule.startsWith("-")) { reverse = true; listRule = listRule.substring(1) }
+            if (listRule.startsWith("+")) { listRule = listRule.substring(1) }
+            val elements = ar.getElements(listRule)
+            val items = if (reverse) elements.reversed() else elements
+            for (element in items) {
                 try {
                     val searchBook = SearchBook(origin = bookSource.bookSourceUrl, originName = bookSource.bookSourceName)
                     val itemAr = AnalyzeRule(ruleData = searchBook, source = bookSource).setContent(element, baseUrl)
@@ -221,8 +292,17 @@ object BookList {
     }
 }
 
+// ==================== BookInfo ====================
+
 object BookInfo {
-    fun analyzeBookInfo(bookSource: BookSource, book: Book, baseUrl: String, body: String, rule: io.legado.engine.data.rule.BookInfoRule, canReName: Boolean = true) {
+    fun analyzeBookInfo(
+        bookSource: BookSource,
+        book: Book,
+        baseUrl: String,
+        body: String,
+        rule: io.legado.engine.data.rule.BookInfoRule,
+        canReName: Boolean = true
+    ) {
         try {
             val ar = AnalyzeRule(ruleData = book, source = bookSource).setContent(body, baseUrl)
             if (!rule.init.isNullOrBlank()) {
@@ -249,14 +329,33 @@ object BookInfo {
     }
 }
 
+// ==================== BookChapterList ====================
+
 object BookChapterList {
     private val wordCountRegex = Regex("(?:^|[\\u5B57\\u6570\\u3010\\u3011\\uFF0C\\u3001\\uFF0C]|\\s+)([0-9\\u4E07\\u5343\\u767E\\u5341\\.]{1,6}\\u5B57)")
-    fun analyzeChapterList(bookSource: BookSource, book: Book, baseUrl: String, body: String, rule: io.legado.engine.data.rule.TocRule): List<BookChapter> {
+
+    /**
+     * 对齐 lyc486 BookChapterList.analyzeChapterList()
+     * 支持 -/+ 前缀反转、isVolume/vip/pay 规则解析、upChapterInfo 持久化
+     */
+    fun analyzeChapterList(
+        bookSource: BookSource,
+        book: Book,
+        baseUrl: String,
+        body: String,
+        rule: io.legado.engine.data.rule.TocRule
+    ): List<BookChapter> {
         val chapters = mutableListOf<BookChapter>()
         try {
             val ar = AnalyzeRule(source = bookSource).setContent(body, baseUrl)
-            val elements = ar.getElements(rule.chapterList ?: "")
-            for ((index, element) in elements.withIndex()) {
+            // 对齐 lyc486: 支持 -/+ 前缀
+            var listRule = rule.chapterList ?: ""
+            var reverse = false
+            if (listRule.startsWith("-")) { reverse = true; listRule = listRule.substring(1) }
+            if (listRule.startsWith("+")) { listRule = listRule.substring(1) }
+            val elements = ar.getElements(listRule)
+            val items = if (reverse) elements.reversed() else elements
+            for ((index, element) in items.withIndex()) {
                 try {
                     val itemAr = AnalyzeRule(ruleData = book, source = bookSource).setContent(element, baseUrl)
                     val chName = itemAr.getString(rule.chapterName ?: "").trim()
@@ -265,15 +364,38 @@ object BookChapterList {
                     val absUrl = AnalyzeUrl.getAbsoluteURL(baseUrl, chUrl)
                     var finalTitle = chName
                     if (!rule.formatJs.isNullOrBlank()) {
-                        try { val fAr = AnalyzeRule(source = bookSource).setContent(chName, absUrl); val formatted = fAr.getString(rule.formatJs!!); if (formatted.isNotBlank()) finalTitle = formatted } catch (_: Exception) {}
+                        try {
+                            val fAr = AnalyzeRule(source = bookSource).setContent(chName, absUrl)
+                            val formatted = fAr.getString(rule.formatJs!!)
+                            if (formatted.isNotBlank()) finalTitle = formatted
+                        } catch (_: Exception) {}
                     }
                     val info = itemAr.getString(rule.updateTime ?: "").trim()
                     val ch = BookChapter(bookUrl = book.bookUrl, url = absUrl, title = finalTitle.ifBlank { "unknown" }, index = index, baseUrl = baseUrl)
-                    if (info.isNotBlank()) {
-                        wordCountRegex.find(info)?.let { match ->
-                            ch.wordCount = match.groupValues[1].trim()
-                            ch.tag = info.replaceFirst(match.value, "")
-                        } ?: run { ch.tag = info }
+                    // 对齐 lyc486: isVolume 解析
+                    if (!rule.isVolume.isNullOrBlank()) {
+                        val isVolumeStr = itemAr.getString(rule.isVolume!!)
+                        if (isVolumeStr == "true" || isVolumeStr == "1") {
+                            ch.isVolume = true
+                            ch.tag = info
+                        }
+                    }
+                    // 对齐 lyc486: isVip / isPay 解析
+                    if (!rule.isVip.isNullOrBlank()) {
+                        val vipStr = itemAr.getString(rule.isVip!!)
+                        if (vipStr == "true" || vipStr == "1") ch.isVip = true
+                    }
+                    if (!rule.isPay.isNullOrBlank()) {
+                        val payStr = itemAr.getString(rule.isPay!!)
+                        if (payStr == "true" || payStr == "1") ch.isPay = true
+                    }
+                    if (!ch.isVolume) {
+                        if (info.isNotBlank()) {
+                            wordCountRegex.find(info)?.let { match ->
+                                ch.wordCount = match.groupValues[1].trim()
+                                ch.tag = info.replaceFirst(match.value, "")
+                            } ?: run { ch.tag = info }
+                        }
                     }
                     chapters.add(ch)
                 } catch (_: Exception) {}

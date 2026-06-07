@@ -252,7 +252,7 @@ class AnalyzeUrl(
     fun getStrResponse(): HttpResponse = getStrResponse(null, null)
 
     fun getString(rule: String): String {
-        val content = dataBody ?: ruleData?.getVariable()?.takeIf { it.isNotEmpty() } ?: return ""
+        val content = dataBody ?: ruleData?.getVariableValue()?.takeIf { it.isNotEmpty() } ?: return ""
         return runCatching {
             AnalyzeRule(ruleData = ruleData, source = source)
                 .setContent(content, baseUrl.ifBlank { url })
@@ -323,8 +323,8 @@ class AnalyzeUrl(
             ?: ""
     }
     fun get(): String {
-        return chapter?.getVariable()?.takeIf { it.isNotEmpty() }
-            ?: ruleData?.getVariable()?.takeIf { it.isNotEmpty() }
+        return chapter?.getVariableValue()?.takeIf { it.isNotEmpty() }
+            ?: ruleData?.getVariableValue()?.takeIf { it.isNotEmpty() }
             ?: source?.getVariable().orEmpty()
     }
 

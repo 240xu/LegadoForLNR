@@ -318,7 +318,7 @@ class AnalyzeRule(
     fun put(key: String, value: String): String { chapter?.putVariable(key, value) ?: book?.putVariable(key, value) ?: ruleData?.putVariable(key, value) ?: source?.put(key, value); return value }
     fun get(key: String): String { return chapter?.getVariable(key)?.takeIf { it.isNotEmpty() } ?: book?.getVariable(key)?.takeIf { it.isNotEmpty() } ?: ruleData?.getVariable(key)?.takeIf { it.isNotEmpty() } ?: source?.get(key)?.takeIf { it.isNotEmpty() } ?: "" }
     fun put(value: String): String { chapter?.putVariable(value) ?: book?.putVariable(value) ?: ruleData?.putVariable(value) ?: source?.putVariable(value); return value }
-    fun get(): String { return chapter?.getVariable()?.takeIf { it.isNotEmpty() } ?: book?.getVariable()?.takeIf { it.isNotEmpty() } ?: ruleData?.getVariable()?.takeIf { it.isNotEmpty() } ?: source?.getVariable().orEmpty() }
+    fun get(): String { return chapter?.getVariableValue()?.takeIf { it.isNotEmpty() } ?: book?.getVariableValue()?.takeIf { it.isNotEmpty() } ?: ruleData?.getVariableValue()?.takeIf { it.isNotEmpty() } ?: source?.getVariable().orEmpty() }
 
     private fun getWebJsResult(jsStr: String, result: Any): String {
         return try {
@@ -426,15 +426,19 @@ class AnalyzeRule(
 
     enum class Mode { XPath, Json, Default, Js, Regex, WebJs }
 
+    /**
+     * 对齐 lyc486 AnalyzeRule.reGetBook()
+     * 使用 preciseSearchAwait 按书名+作者精确匹配
+     */
     fun reGetBook() {
         if (!preUpdateJs) throw AssertionError("only callable in preUpdateJs context")
         val bookSource = source as? BookSource
         val bk = book as? Book
         if (bookSource == null || bk == null) return
-        val searchResult = WebBook.searchBookAwait(bookSource, bk.name)
-        searchResult.firstOrNull()?.let {
-            bk.bookUrl = it.bookUrl
-            it.variableMap?.forEach { entry -> bk.putVariable(entry.key, entry.value) }
+        val matched = WebBook.preciseSearchAwait(bookSource, bk.name, bk.author)
+        if (matched != null) {
+            bk.bookUrl = matched.bookUrl
+            matched.variableMap.forEach { entry -> bk.putVariable(entry.key, entry.value) }
         }
         WebBook.getBookInfoAwait(bookSource, bk, false)
     }

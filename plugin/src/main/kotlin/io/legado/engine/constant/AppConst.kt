@@ -1,4 +1,4 @@
-﻿package io.legado.engine.constant
+package io.legado.engine.constant
 
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -12,6 +12,9 @@ object AppConst {
     const val UA_NAME = "User-Agent"
     const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     const val ANDROID_ID = "legado_lnr_plugin"
+
+    /** 对齐 lyc486: androidId 用于 AES 加密 key */
+    val androidId: String get() = ANDROID_ID
 
     val dateFormat: SimpleDateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     val dateFormatGMT: SimpleDateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.ENGLISH)

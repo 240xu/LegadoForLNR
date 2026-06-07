@@ -1,13 +1,16 @@
-﻿package io.legado.engine.data
+package io.legado.engine.data
+
+import io.legado.engine.shim.GSON
+import io.legado.engine.shim.fromJsonObject
 
 data class Book(
     override var bookUrl: String = "",
     override var tocUrl: String = "",
     var origin: String = "",
     var originName: String = "",
-    var name: String = "",
-    var author: String = "",
-    var kind: String? = null,
+    override var name: String = "",
+    override var author: String = "",
+    override var kind: String? = null,
     var customTag: String? = null,
     var coverUrl: String? = null,
     var customCoverUrl: String? = null,
@@ -32,7 +35,7 @@ data class Book(
     var originOrder: Int = 0,
     var canUpdate: Boolean = true,
     var useReplaceRule: Boolean = true,
-    var wordCount: String? = null,
+    override var wordCount: String? = null,
     override var type: Int = 0,
     override var order: Int = 0,
     override var imageStyle: String? = null,
@@ -41,8 +44,17 @@ data class Book(
     override var infoHtml: String? = null,
     override var tocHtml: String? = null,
     var downloadUrls: List<String>? = null,
-    override var variableMap: HashMap<String, String> = hashMapOf(),
+    /** 对齐 lyc486: 变量 JSON 字符串 */
+    override var variable: String? = null,
 ) : BaseBook {
+
+    /**
+     * 对齐 lyc486: lazy 从 variable JSON 反序列化
+     */
+    @delegate:Transient
+    override val variableMap: HashMap<String, String> by lazy {
+        GSON.fromJsonObject<HashMap<String, String>>(variable) ?: hashMapOf()
+    }
 
     fun getBookSource(): String = origin
 
@@ -61,7 +73,8 @@ data class Book(
                 originName = searchBook.originName,
                 originOrder = searchBook.originOrder,
                 tag = searchBook.tag,
-                tocUrl = searchBook.tocUrl
+                tocUrl = searchBook.tocUrl,
+                variable = searchBook.variable,
             )
         }
     }

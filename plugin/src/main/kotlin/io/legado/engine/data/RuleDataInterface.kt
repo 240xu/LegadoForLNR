@@ -3,7 +3,10 @@ package io.legado.engine.data
 interface RuleDataInterface {
     val variableMap: HashMap<String, String>
 
-    fun putVariable(key: String, value: String?) {
+    /**
+     * 对齐 lyc486: 返回 Boolean 表示 key 是否已存在
+     */
+    fun putVariable(key: String, value: String?): Boolean {
         val keyExist = variableMap.contains(key)
         when {
             value == null -> {
@@ -19,9 +22,10 @@ interface RuleDataInterface {
                 putBigVariable(key, value)
             }
         }
+        return keyExist
     }
 
-    fun putVariable(value: String?) = putVariable("", value)
+    fun putVariable(value: String?): Boolean = putVariable("", value)
 
     fun putBigVariable(key: String, value: String?) {
         // Default: no-op. Override for big variable storage.
@@ -31,7 +35,7 @@ interface RuleDataInterface {
         return variableMap[key] ?: getBigVariable(key) ?: ""
     }
 
-    fun getVariable(): String = getVariable("")
+    fun getVariableValue(): String = getVariable("")
 
     fun getBigVariable(key: String): String? {
         return null
