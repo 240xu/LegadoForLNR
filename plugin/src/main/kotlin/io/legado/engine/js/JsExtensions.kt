@@ -794,26 +794,25 @@ class SymmetricCryptoHelper(
     private val ivSpec: IvParameterSpec? = iv?.takeIf { it.isNotEmpty() }?.let { IvParameterSpec(it) }
 
     fun encrypt(data: ByteArray): ByteArray {
-        cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec ?: run {
-            val ivBytes = ByteArray(cipher.blockSize)
-            SecureRandom().nextBytes(ivBytes)
-            IvParameterSpec(ivBytes)
-        })
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec)
         return cipher.doFinal(data)
     }
 
     fun encrypt(data: String): ByteArray = encrypt(data.toByteArray())
 
     fun decrypt(data: ByteArray): ByteArray {
-        cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec ?: run {
-            val ivBytes = ByteArray(cipher.blockSize)
-            SecureRandom().nextBytes(ivBytes)
-            IvParameterSpec(ivBytes)
-        })
+        cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
         return cipher.doFinal(data)
     }
 
-    fun decrypt(data: String): ByteArray = decrypt(java.util.Base64.getDecoder().decode(data))
+    fun decrypt(data: String): ByteArray {
+        val bytes = if (data.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+            data.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        } else {
+            java.util.Base64.getDecoder().decode(data)
+        }
+        return decrypt(bytes)
+    }
 
     fun decryptStr(data: String): String? {
         return try {
