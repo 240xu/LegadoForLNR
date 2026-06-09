@@ -1,4 +1,4 @@
-﻿package io.legado.plugin
+package io.legado.plugin
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -109,6 +109,10 @@ class LegadoJsonWebDataSource(
         private const val EXPLORE_PREVIEW_ROW_LIMIT = 12
         private const val EXPLORE_PREVIEW_BOOK_LIMIT = 12
         private const val SEARCH_PAGE_LIMIT = 3
+        private const val EVENT_START_READ = "startRead"
+        private const val EVENT_END_READ = "endRead"
+        private const val EVENT_CLICK_CUSTOM_BUTTON = "clickCustomButton"
+        private const val EVENT_LONG_CLICK_CUSTOM_BUTTON = "longClickCustomButton"
     }
 
     private val bookSources = mutableListOf<BookSource>()
@@ -1580,6 +1584,23 @@ class LegadoJsonWebDataSource(
         return match?.groupValues?.getOrNull(1)
     }
 
+    private data class ImageOption(
+        val style: String? = null,
+        val click: String? = null
+    )
+
+    private fun extractImageOption(raw: String): ImageOption {
+        val obj = extractLegadoImageParams(raw)
+            ?.let(::parseJsonLenient)
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+            ?: return ImageOption()
+        return ImageOption(
+            style = obj.get("style")?.let(::jsonScalarString)?.takeIf { it.isNotBlank() },
+            click = obj.get("click")?.let(::jsonScalarString)?.takeIf { it.isNotBlank() }
+        )
+    }
+
     private fun extractImageHeaders(raw: String): Map<String, String> {
         val params = extractLegadoImageParams(raw) ?: return emptyMap()
         val headersElement = parseJsonLenient(params)
@@ -1842,6 +1863,23 @@ class LegadoJsonWebDataSource(
         }.getOrNull()?.let(CookieStore::clear)
     }
 
+    fun runCustomButton(source: BookSource, longClick: Boolean = false): Boolean {
+        if (!source.customButton || !source.eventListener) return false
+        val event = if (longClick) EVENT_LONG_CLICK_CUSTOM_BUTTON else EVENT_CLICK_CUSTOM_BUTTON
+        val js = source.getContentRule().callBackJs?.takeIf { it.isNotBlank() } ?: return false
+        return runCatching {
+            source.evalJS(unwrapJsBlock(js)) { bindings ->
+                bindings["event"] = event
+                bindings["result"] = null
+                bindings["book"] = null
+                bindings["chapter"] = null
+                bindings["java"] = LoginJsBridge(null, source.bookSourceUrl, bookSource = source)
+            }
+        }.onFailure {
+            android.util.Log.w("LegadoDS", "custom button failed: ${source.bookSourceName}", it)
+        }.isSuccess
+    }
+
     // ==================== 书籍详情 ====================
 
     override suspend fun getBookInformation(id: String): BookInformation = withContext(Dispatchers.IO) {
@@ -1890,12 +1928,16 @@ class LegadoJsonWebDataSource(
                 val chapterIndex = chapters.indexOfFirst { it.url == chapterUrl }
                 val bookChapter = chapters.getOrNull(chapterIndex)?.copy()
                     ?: BookChapter(bookUrl = bookUrl, url = chapterUrl, title = "", index = 0, baseUrl = book.tocUrl.ifBlank { book.bookUrl })
+                book.durChapterIndex = bookChapter.index
+                book.durChapterTitle = bookChapter.title
                 val nextChapterUrl = if (chapterIndex >= 0) chapters.getOrNull(chapterIndex + 1)?.url else null
                 val lastChapter = if (chapterIndex > 0) chapters.getOrNull(chapterIndex - 1)?.url?.let { makeId(sourceUrl, it) }.orEmpty() else ""
                 val nextChapter = if (chapterIndex >= 0) nextChapterUrl?.let { makeId(sourceUrl, it) }.orEmpty() else ""
+                runSourceCallback(source, EVENT_START_READ, book, bookChapter)
                 val rawContent = WebBook.getContentAwait(source, book, bookChapter, nextChapterUrl)
+                runSourceCallback(source, EVENT_END_READ, book, bookChapter, rawContent)
                 val chTitle = bookChapter.title.ifBlank { "" }
-                val contentJson = buildLnrContentJson(rawContent, chapterUrl, source, book)
+                val contentJson = buildLnrContentJson(rawContent, chapterUrl, source, book, bookChapter)
                 MutableChapterContent(chapterId, chTitle, contentJson, lastChapter, nextChapter)
             } catch (_: Exception) { ChapterContent.empty(chapterId) }
         }
@@ -1944,46 +1986,152 @@ class LegadoJsonWebDataSource(
         text: String,
         baseUrl: String,
         source: BookSource,
-        book: Book
+        book: Book,
+        chapter: BookChapter? = null
     ): JsonObject {
         val components = buildJsonArray {
-            addMarkedContent(text, baseUrl, source, book)
+            addPayActionComponentIfNeeded(text, baseUrl, source, book, chapter)
+            addCustomButtonComponentsIfNeeded(baseUrl, source, book, chapter)
+            addMarkedContent(text, baseUrl, source, book, chapter)
         }
         return buildJsonObject { put("components", components) }
+    }
+
+    private fun JsonArrayBuilder.addPayActionComponentIfNeeded(
+        text: String,
+        baseUrl: String,
+        source: BookSource,
+        book: Book,
+        chapter: BookChapter?
+    ) {
+        val payAction = source.getContentRule().payAction?.takeIf { it.isNotBlank() } ?: return
+        val shouldShow = chapter?.let { it.isVip && !it.isPay } == true ||
+            (chapter?.isPay == false && text.isBlank())
+        if (!shouldShow) return
+        add(buildJsonObject {
+            put("id", LegadoActionComponentData.ID)
+            put("data", buildJsonObject {
+                put("label", "购买本章")
+                put("action", payAction)
+                put("sourceJson", gson.toJson(source))
+                put("bookJson", gson.toJson(book))
+                put("chapterJson", gson.toJson(chapter))
+                put("title", chapter?.title.orEmpty())
+                put("baseUrl", chapter?.url?.takeIf { it.isNotBlank() } ?: baseUrl)
+            })
+        })
+    }
+
+    private fun JsonArrayBuilder.addCustomButtonComponentsIfNeeded(
+        baseUrl: String,
+        source: BookSource,
+        book: Book,
+        chapter: BookChapter?
+    ) {
+        val callBackJs = source.getContentRule().callBackJs?.takeIf { it.isNotBlank() } ?: return
+        if (!source.customButton || !source.eventListener) return
+        addCallbackActionComponent(
+            label = "自定义操作",
+            event = EVENT_CLICK_CUSTOM_BUTTON,
+            action = callBackJs,
+            baseUrl = baseUrl,
+            source = source,
+            book = book,
+            chapter = chapter
+        )
+        addCallbackActionComponent(
+            label = "长按自定义操作",
+            event = EVENT_LONG_CLICK_CUSTOM_BUTTON,
+            action = callBackJs,
+            baseUrl = baseUrl,
+            source = source,
+            book = book,
+            chapter = chapter
+        )
+    }
+
+    private fun JsonArrayBuilder.addCallbackActionComponent(
+        label: String,
+        event: String,
+        action: String,
+        baseUrl: String,
+        source: BookSource,
+        book: Book?,
+        chapter: BookChapter?,
+        result: String = ""
+    ) {
+        add(buildJsonObject {
+            put("id", LegadoActionComponentData.ID)
+            put("data", buildJsonObject {
+                put("label", label)
+                put("event", event)
+                put("action", action)
+                put("sourceJson", gson.toJson(source))
+                put("bookJson", gson.toJson(book))
+                put("chapterJson", gson.toJson(chapter))
+                put("title", chapter?.title.orEmpty())
+                put("baseUrl", chapter?.url?.takeIf { it.isNotBlank() } ?: baseUrl)
+                put("result", result)
+            })
+        })
     }
 
     private fun JsonArrayBuilder.addMarkedContent(
         text: String,
         baseUrl: String,
         source: BookSource,
-        book: Book
+        book: Book,
+        chapter: BookChapter?
     ) {
         val markerPattern = Regex("<(usehtml|useweb|md)>([\\s\\S]*?)</\\1>", RegexOption.IGNORE_CASE)
         var lastEnd = 0
         for (match in markerPattern.findAll(text)) {
-            addPlainOrHtmlContent(text.substring(lastEnd, match.range.first), baseUrl, source, book)
+            addPlainOrHtmlContent(text.substring(lastEnd, match.range.first), baseUrl, source, book, chapter)
             val tag = match.groupValues[1].lowercase()
             val body = match.groupValues[2]
             when (tag) {
-                "usehtml" -> addHtmlContent(body, baseUrl, source, book)
+                "usehtml" -> addHtmlContent(body, baseUrl, source, book, chapter)
                 "useweb" -> addLegadoHtmlComponent(body, baseUrl, source)
-                "md" -> addMarkdownContent(body, baseUrl, source, book)
+                "md" -> addMarkdownContent(body, baseUrl, source, book, chapter)
             }
             lastEnd = match.range.last + 1
         }
-        if (lastEnd < text.length) addPlainOrHtmlContent(text.substring(lastEnd), baseUrl, source, book)
+        if (lastEnd < text.length) addPlainOrHtmlContent(text.substring(lastEnd), baseUrl, source, book, chapter)
     }
 
     private fun JsonArrayBuilder.addPlainOrHtmlContent(
         text: String,
         baseUrl: String,
         source: BookSource,
-        book: Book
+        book: Book,
+        chapter: BookChapter?
     ) {
         if (text.contains("<img", ignoreCase = true)) {
-            addHtmlContent(text, baseUrl, source, book)
+            addHtmlContent(text, baseUrl, source, book, chapter)
         } else {
             addTextComponents(text)
+        }
+    }
+
+    private fun runSourceCallback(
+        source: BookSource,
+        event: String,
+        book: Book? = null,
+        chapter: BookChapter? = null,
+        result: String? = null
+    ) {
+        if (!source.eventListener) return
+        val js = source.getContentRule().callBackJs?.takeIf { it.isNotBlank() } ?: return
+        runCatching {
+            source.evalJS(unwrapJsBlock(js)) { bindings ->
+                bindings["event"] = event
+                bindings["result"] = result
+                bindings["book"] = book
+                bindings["chapter"] = chapter
+                bindings["java"] = LoginJsBridge(null, source.bookSourceUrl, bookSource = source)
+            }
+        }.onFailure {
+            android.util.Log.w("LegadoDS", "callback $event failed: ${source.bookSourceName}", it)
         }
     }
 
@@ -1991,7 +2139,8 @@ class LegadoJsonWebDataSource(
         html: String,
         baseUrl: String,
         source: BookSource,
-        book: Book
+        book: Book,
+        chapter: BookChapter?
     ) {
         val doc = Jsoup.parseBodyFragment(html, baseUrl)
         val body = doc.body()
@@ -2007,7 +2156,7 @@ class LegadoJsonWebDataSource(
             when (element.normalName()) {
                 "img" -> {
                     flushText()
-                    addImageComponent(sanitizeImageUrl(extractImageUrl(element), baseUrl, source, book))
+                    addImageComponent(extractImageUrl(element), baseUrl, source, book, chapter)
                     return
                 }
                 "br" -> {
@@ -2070,13 +2219,14 @@ class LegadoJsonWebDataSource(
         markdown: String,
         baseUrl: String,
         source: BookSource,
-        book: Book
+        book: Book,
+        chapter: BookChapter?
     ) {
         val imgPattern = Regex("!\\[[^]]*]\\(([^)]+)\\)")
         var lastEnd = 0
         for (match in imgPattern.findAll(markdown)) {
             addTextComponents(cleanMarkdownText(markdown.substring(lastEnd, match.range.first)))
-            addImageComponent(sanitizeImageUrl(match.groupValues[1].trim(), baseUrl, source, book))
+            addImageComponent(match.groupValues[1].trim(), baseUrl, source, book, chapter)
             lastEnd = match.range.last + 1
         }
         if (lastEnd < markdown.length) {
@@ -2084,11 +2234,34 @@ class LegadoJsonWebDataSource(
         }
     }
 
-    private fun JsonArrayBuilder.addImageComponent(uri: String) {
+    private fun JsonArrayBuilder.addImageComponent(
+        rawUri: String,
+        baseUrl: String,
+        source: BookSource,
+        book: Book,
+        chapter: BookChapter?
+    ) {
+        val uri = sanitizeImageUrl(rawUri, baseUrl, source, book)
         if (uri.isBlank()) return
+        val option = extractImageOption(rawUri)
+        val style = option.style ?: source.getContentRule().imageStyle.orEmpty()
+        val headers = source.getHeaderMap(true).toMutableMap().apply {
+            putAll(extractImageHeaders(rawUri))
+        }
         add(buildJsonObject {
-            put("id", "image")
-            put("data", buildJsonObject { put("uri", uri) })
+            put("id", LegadoImageComponentData.ID)
+            put("data", buildJsonObject {
+                put("uri", uri)
+                put("style", style)
+                put("click", option.click.orEmpty())
+                put("src", cleanImageUrl(rawUri, baseUrl))
+                put("headers", buildJsonObject {
+                    headers.forEach { (key, value) -> put(key, value) }
+                })
+                put("sourceJson", gson.toJson(source))
+                put("bookJson", gson.toJson(book))
+                put("chapterJson", gson.toJson(chapter))
+            })
         })
     }
 

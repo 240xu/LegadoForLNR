@@ -1,4 +1,4 @@
-﻿package io.legado.plugin
+package io.legado.plugin
 
 import android.content.Context
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,8 +10,8 @@ import io.nightfish.lightnovelreader.api.web.WebBookDataSourceManagerApi
 
 @Plugin(
     name = "Legado JSON 书源",
-    version = 16,
-    versionName = "1.4.0",
+    version = 17,
+    versionName = "1.4.1",
     author = "LNR Legado Plugin",
     description = "支持导入 lyc486 版 Legado JSON 书源，增强 loginUi、发现页、旧字段迁移和宿主 PageContent 管理。",
     updateUrl = "",
@@ -30,6 +30,22 @@ class LegadoJsonPlugin(
                 .component(LegadoHtmlComponent::class)
                 .data(LegadoHtmlComponentData::class)
                 .serializer(LegadoHtmlComponentData.jsonSerializer)
+                .register()
+        }
+        runCatching {
+            contentComponentRepositoryApi.registrar
+                .id(LegadoImageComponentData.ID)
+                .component(LegadoImageComponent::class)
+                .data(LegadoImageComponentData::class)
+                .serializer(LegadoImageComponentData.jsonSerializer)
+                .register()
+        }
+        runCatching {
+            contentComponentRepositoryApi.registrar
+                .id(LegadoActionComponentData.ID)
+                .component(LegadoActionComponent::class)
+                .data(LegadoActionComponentData::class)
+                .serializer(LegadoActionComponentData.jsonSerializer)
                 .register()
         }
         android.util.Log.i("LegadoJsonPlugin", "Legado JSON 书源插件已加载")

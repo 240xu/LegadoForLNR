@@ -1,4 +1,4 @@
-﻿package io.legado.plugin
+package io.legado.plugin
 
 import android.app.Activity
 import android.content.ClipData
@@ -234,6 +234,14 @@ fun LegadoSourceManagerContent(
                             statusText = "已清理 ${source.bookSourceName.ifBlank { source.bookSourceUrl }} 的运行缓存"
                             refreshSources()
                         },
+                        onCustomButton = { longClick ->
+                            val ok = dataSource.runCustomButton(source, longClick)
+                            statusText = if (ok) {
+                                "已执行 ${source.bookSourceName.ifBlank { source.bookSourceUrl }} 的自定义按钮"
+                            } else {
+                                "此书源未启用 customButton/eventListener/callBackJs"
+                            }
+                        },
                         onDelete = {
                             dataSource.deleteSource(source.bookSourceUrl)
                             refreshSources()
@@ -276,6 +284,7 @@ private fun SourceCard(
     onLegacyLogin: () -> Unit,
     onLogout: () -> Unit,
     onClearCache: () -> Unit,
+    onCustomButton: (Boolean) -> Unit,
     onDelete: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -323,6 +332,18 @@ private fun SourceCard(
                 }
                 OutlinedButton(onClick = onClearCache) {
                     Text("清缓存")
+                }
+                OutlinedButton(
+                    enabled = source.customButton && source.eventListener && !source.getContentRule().callBackJs.isNullOrBlank(),
+                    onClick = { onCustomButton(false) }
+                ) {
+                    Text("自定义")
+                }
+                OutlinedButton(
+                    enabled = source.customButton && source.eventListener && !source.getContentRule().callBackJs.isNullOrBlank(),
+                    onClick = { onCustomButton(true) }
+                ) {
+                    Text("长按")
                 }
                 TextButton(onClick = onDelete) {
                     Text("删除")
