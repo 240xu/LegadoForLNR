@@ -148,10 +148,29 @@ object HttpClient {
         dnsIp: String? = null,
         timeoutMillis: Long? = null
     ): ByteArray {
+        return requestBytes("GET", url, null, headers, proxy, dnsIp, timeoutMillis)
+    }
+
+    fun requestBytes(
+        method: String,
+        url: String,
+        body: String? = null,
+        headers: Map<String, String> = emptyMap(),
+        proxy: String? = null,
+        dnsIp: String? = null,
+        timeoutMillis: Long? = null
+    ): ByteArray {
         val merged = buildHeaders(url, headers)
-        val builder = Request.Builder().url(url).get()
+        val mediaType = resolveMediaType(merged)
+        val builder = Request.Builder().url(url)
+        when (method.uppercase()) {
+            "POST" -> builder.post((body ?: "").toRequestBody(mediaType))
+            "HEAD" -> builder.head()
+            else -> builder.get()
+        }
         merged.forEach { (k, v) -> builder.addHeader(k, v) }
         val resp = clientFor(proxy, dnsIp, timeoutMillis).newCall(builder.build()).execute()
+        saveCookies(resp)
         return resp.body?.bytes() ?: ByteArray(0)
     }
 

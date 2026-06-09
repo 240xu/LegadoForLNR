@@ -92,6 +92,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.TextNode
 import java.io.File
+import java.io.InputStream
 import java.io.StringReader
 import java.net.URL
 import java.util.Base64
@@ -931,6 +932,18 @@ class LegadoJsonWebDataSource(
             "payAction" to "ruleBookContentPayAction",
             "callBackJs" to "ruleBookContentCallBackJs"
         ))
+        putRuleObjectIfMissing(obj, "ruleReview", mapOf(
+            "reviewUrl" to "ruleReviewUrl",
+            "avatarRule" to "ruleReviewAvatar",
+            "contentRule" to "ruleReviewContent",
+            "postTimeRule" to "ruleReviewPostTime",
+            "reviewQuoteUrl" to "ruleReviewQuoteUrl",
+            "voteUpUrl" to "ruleReviewVoteUpUrl",
+            "voteDownUrl" to "ruleReviewVoteDownUrl",
+            "postReviewUrl" to "ruleReviewPostReviewUrl",
+            "postQuoteUrl" to "ruleReviewPostQuoteUrl",
+            "deleteUrl" to "ruleReviewDeleteUrl"
+        ))
         copyRuleAlias(obj, "ruleBookInfo", "canReName", "ruleCanReName")
         copyRuleAlias(obj, "ruleBookInfo", "downloadUrls", "ruleBookDownloadUrls")
         copyRuleAlias(obj, "ruleToc", "formatJs", "ruleChapterFormatJs")
@@ -946,6 +959,16 @@ class LegadoJsonWebDataSource(
         copyRuleAlias(obj, "ruleContent", "imageDecode", "ruleImageDecode", "ruleContentImageDecode")
         copyRuleAlias(obj, "ruleContent", "payAction", "rulePayAction", "ruleContentPayAction")
         copyRuleAlias(obj, "ruleContent", "callBackJs", "ruleCallBackJs", "ruleContentCallBackJs")
+        copyRuleAlias(obj, "ruleReview", "reviewUrl", "ruleCommentUrl", "ruleReviewListUrl")
+        copyRuleAlias(obj, "ruleReview", "avatarRule", "ruleAvatar", "ruleReviewAvatarRule")
+        copyRuleAlias(obj, "ruleReview", "contentRule", "ruleReviewContentRule")
+        copyRuleAlias(obj, "ruleReview", "postTimeRule", "rulePostTime", "ruleReviewTime")
+        copyRuleAlias(obj, "ruleReview", "reviewQuoteUrl", "ruleQuoteUrl", "ruleReviewQuote")
+        copyRuleAlias(obj, "ruleReview", "voteUpUrl", "ruleVoteUpUrl")
+        copyRuleAlias(obj, "ruleReview", "voteDownUrl", "ruleVoteDownUrl")
+        copyRuleAlias(obj, "ruleReview", "postReviewUrl", "rulePostReviewUrl")
+        copyRuleAlias(obj, "ruleReview", "postQuoteUrl", "rulePostQuoteUrl")
+        copyRuleAlias(obj, "ruleReview", "deleteUrl", "ruleDeleteReviewUrl")
         return obj
     }
 
@@ -1636,7 +1659,7 @@ class LegadoJsonWebDataSource(
         val result = runCatching {
             source.evalJS(unwrapJsBlock(ruleJs)) { bindings ->
                 bindings["book"] = book
-                bindings["result"] = originalBytes
+                bindings["result"] = if (isCover) originalBytes.inputStream() else originalBytes
                 bindings["src"] = cleanUrl
             }
         }.getOrNull()
@@ -1683,6 +1706,7 @@ class LegadoJsonWebDataSource(
         return when (this) {
             null -> null
             is ByteArray -> this
+            is InputStream -> use { it.readBytes() }
             is Iterable<*> -> mapNumbersToBytes(toList())
             is Array<*> -> mapNumbersToBytes(toList())
             is IntArray -> map { it.toByte() }.toByteArray()

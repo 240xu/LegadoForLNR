@@ -155,15 +155,35 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
     }
 
     private fun LinearLayout.addSelect(rowUi: RowUi, savedInfo: Map<String, String>) {
-        addView(TextView(context).apply { text = rowUi.name; textSize = 14f; setTypeface(null, Typeface.BOLD); setPadding(dp(8), dp(4), dp(8), dp(4)) })
+        val label = TextView(context).apply {
+            text = resolveViewNameStatic(rowUi)
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+        }
+        addView(label)
         val opts = rowUi.chars?.filterNotNull()?.toTypedArray() ?: arrayOf()
         val sp = Spinner(context).apply {
             adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, opts)
             val di = opts.indexOfFirst { it == (savedInfo[rowUi.name] ?: rowUi.default) }; if (di >= 0) setSelection(di)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) }
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener { override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { hasFormChanges = true }; override fun onNothingSelected(p: AdapterView<*>?) {} }
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                private var isInitializing = true
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    if (isInitializing) {
+                        isInitializing = false
+                        return
+                    }
+                    hasFormChanges = true
+                    if (!rowUi.action.isNullOrBlank()) executeButtonAction(rowUi, false)
+                }
+                override fun onNothingSelected(p: AdapterView<*>?) {}
+            }
         }
         formViews[rowUi.name] = sp; addView(sp)
+        if (rowUi.viewName != null && !(rowUi.viewName!!.length in 3..19 && rowUi.viewName!!.first() == '\'' && rowUi.viewName!!.last() == '\'')) {
+            Thread { val r = evalUiJs(rowUi.viewName!!); runOnUiThread { label.text = if (r.isNullOrEmpty()) "null" else r } }.start()
+        }
     }
 
     private fun LinearLayout.addButton(rowUi: RowUi) {
@@ -233,6 +253,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                 RowUi.Type.button -> { val btn = viewNameButtons[r.name] ?: continue; Thread { val res = evalUiJs(vn); runOnUiThread { btn.text = if (res.isNullOrEmpty()) "null" else res; r.viewName = res } }.start() }
                 RowUi.Type.toggle -> { val tv = toggleViews[r.name] ?: continue; val chars = r.chars?.filterNotNull() ?: listOf("x"); Thread { val res = evalUiJs(vn); runOnUiThread { if (!res.isNullOrEmpty()) { r.viewName = res; tv.text = chars[0] + res } } }.start() }
                 RowUi.Type.text, RowUi.Type.password -> { val et = formViews[r.name] as? EditText ?: continue; Thread { val res = evalUiJs(vn); runOnUiThread { et.hint = if (res.isNullOrEmpty()) "null" else res } }.start() }
+                RowUi.Type.select -> {}
             }
         }
     }

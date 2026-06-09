@@ -389,7 +389,7 @@ class AnalyzeUrl(
     fun getResponse(): HttpResponse = runBlocking { execute() }
     private fun getByteArrayIfDataUri(): ByteArray? {
         if (!url.startsWith("data:", true)) return null
-        return decodeDataUrl(url)?.toByteArray()
+        return decodeDataUrlBytes(url)
     }
     fun getByteArray(): ByteArray {
         getByteArrayIfDataUri()?.let { return it }
@@ -486,8 +486,19 @@ class AnalyzeUrl(
     suspend fun getResponseAwait(): HttpResponse = execute()
     fun getErrResponse(e: Throwable): HttpResponse = HttpResponse(url ?: "", e.message ?: "", 500, emptyMap())
     fun getErrStrResponse(e: Throwable): StrResponse = StrResponse(getErrResponse(e))
-    suspend fun getByteArrayAwait(): ByteArray { val resp = execute(); return resp.body.toByteArray(java.nio.charset.Charset.forName(charset ?: "UTF-8")) }
-    suspend fun getInputStreamAwait(): java.io.InputStream { val resp = execute(); return resp.body.byteInputStream() }
+    suspend fun getByteArrayAwait(): ByteArray {
+        getByteArrayIfDataUri()?.let { return it }
+        return HttpClient.requestBytes(
+            method = method,
+            url = requestUrl(),
+            body = requestBodyForBytes(),
+            headers = requestHeadersForBytes(),
+            proxy = proxy,
+            dnsIp = dnsIp,
+            timeoutMillis = callTimeout
+        )
+    }
+    suspend fun getInputStreamAwait(): java.io.InputStream = getByteArrayAwait().inputStream()
     suspend fun upload(fileName: String, file: Any, contentType: String): StrResponse {
         setCookie()
         val bodyMap = GSON.fromJsonObject<LinkedHashMap<String, Any?>>(body) ?: linkedMapOf()
@@ -524,6 +535,25 @@ class AnalyzeUrl(
         )
         saveCookie(httpResponse)
         return StrResponse(httpResponse)
+    }
+
+    private fun requestBodyForBytes(): String? {
+        if (!method.equals("POST", true)) return null
+        return if (!encodedForm.isNullOrBlank()) encodedForm else body ?: ""
+    }
+
+    private fun requestHeadersForBytes(): Map<String, String> {
+        if (!method.equals("POST", true)) return headerMap
+        val headers = LinkedHashMap(headerMap)
+        val hasContentType = headers.keys.any { it.equals("Content-Type", true) }
+        if (!hasContentType) {
+            headers["Content-Type"] = if (!encodedForm.isNullOrBlank()) {
+                "application/x-www-form-urlencoded"
+            } else {
+                "application/json; charset=utf-8"
+            }
+        }
+        return headers
     }
 
     companion object {
@@ -604,6 +634,22 @@ class AnalyzeUrl(
                 String(Base64.getDecoder().decode(payload), Charsets.UTF_8)
             } else {
                 java.net.URLDecoder.decode(payload, charset ?: "UTF-8")
+            }
+        }.getOrNull()
+    }
+
+    private fun decodeDataUrlBytes(value: String): ByteArray? {
+        if (!value.startsWith("data:", true)) return null
+        return runCatching {
+            val main = value.substringBefore(",{")
+            val payload = main.substringAfter(",", "")
+            if (payload.isBlank()) return@runCatching ByteArray(0)
+            val meta = main.substringBefore(",", "")
+            if (meta.contains(";base64", true)) {
+                Base64.getDecoder().decode(payload)
+            } else {
+                java.net.URLDecoder.decode(payload, charset ?: "UTF-8")
+                    .toByteArray(java.nio.charset.Charset.forName(charset ?: "UTF-8"))
             }
         }.getOrNull()
     }
