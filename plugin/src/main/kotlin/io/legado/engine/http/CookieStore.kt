@@ -25,7 +25,7 @@ object CookieStore {
         if (cookie.isBlank()) return
         val d = normalizeDomain(domain)
         val map = store.getOrPut(d) { ConcurrentHashMap() }
-        parsePairs(cookie).forEach { (name, value) -> map[name] = value }
+        parseSetCookie(cookie).forEach { (name, value) -> map[name] = value }
     }
 
     fun setCookieFromUrl(url: String, cookie: String) {
@@ -56,7 +56,7 @@ object CookieStore {
         val d = normalizeDomain(urlToHost(key) ?: key)
         val map = store.getOrPut(d) { ConcurrentHashMap() }
         map.clear()
-        parsePairs(cookie).forEach { (name, value) -> map[name] = value }
+        parseCookieHeader(cookie).forEach { (name, value) -> map[name] = value }
     }
 
     fun removeCookie(key: String) {
@@ -77,24 +77,29 @@ object CookieStore {
         domain.lowercase().removePrefix(".")
 
     /**
-     * 将原始 Set-Cookie / Cookie 字符串拆成 name=value 对。
-     * - Set-Cookie 格式：sid=abc; Path=/; HttpOnly -> 只取 sid=abc
-     * - Cookie header 格式：=1; b=2; c=3 -> 返回 a=1, b=2, c=3
-     *
-     * 策略：按 ; 拆分，每段若包含 = 且第一个 = 前的 trim 后不含空格，
-     * 视为 name=value；其余为属性，忽略。
+     * Set-Cookie 一行只保存第一个 name=value，Path/SameSite 等属性不是 Cookie。
      */
-    private fun parsePairs(raw: String): List<Pair<String, String>> {
+    private fun parseSetCookie(raw: String): List<Pair<String, String>> {
+        val first = raw.substringBefore(';').trim()
+        return parseCookieSegment(first)?.let { listOf(it) } ?: emptyList()
+    }
+
+    private fun parseCookieHeader(raw: String): List<Pair<String, String>> {
         val result = mutableListOf<Pair<String, String>>()
         for (segment in raw.split(';')) {
-            val trimmed = segment.trim()
-            if (trimmed.isBlank()) continue
-            val eqIdx = trimmed.indexOf('=')
-            if (eqIdx <= 0) continue
-            val name = trimmed.substring(0, eqIdx).trim()
-            val value = trimmed.substring(eqIdx + 1).trim()
-            result.add(name to value)
+            parseCookieSegment(segment)?.let(result::add)
         }
         return result
+    }
+
+    private fun parseCookieSegment(segment: String): Pair<String, String>? {
+        val trimmed = segment.trim()
+        if (trimmed.isBlank()) return null
+        val eqIdx = trimmed.indexOf('=')
+        if (eqIdx <= 0) return null
+        val name = trimmed.substring(0, eqIdx).trim()
+        if (name.isBlank() || name.any { it.isWhitespace() }) return null
+        val value = trimmed.substring(eqIdx + 1).trim()
+        return name to value
     }
 }

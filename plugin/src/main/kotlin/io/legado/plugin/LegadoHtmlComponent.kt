@@ -124,6 +124,6 @@ class LegadoHtmlComponent(
     private fun syncCookie(url: String) {
         if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) return
         val cookie = CookieManager.getInstance().getCookie(url) ?: return
-        CookieStore.setCookieFromUrl(url, cookie)
+        CookieStore.replaceCookie(url, cookie)
     }
 }

@@ -42,7 +42,7 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * 对应 Legado 的 SourceLoginJsExtensions
  */
-class LoginJsBridge(
+open class LoginJsBridge(
     activity: Activity? = null,
     private val sourceUrl: String,
     private val callback: Callback? = null,
@@ -176,17 +176,17 @@ class LoginJsBridge(
     }
 
     /** source.getVariable() / source.putVariable() */
-    fun getVariable(): String = CacheManager.get("sourceVariable_$sourceUrl") ?: ""
-    fun getVariable(key: String): String = get(key)
-    fun setVariable(value: String?) {
+    open fun getVariable(): String = CacheManager.get("sourceVariable_$sourceUrl") ?: ""
+    open fun getVariable(key: String): String = get(key)
+    open fun setVariable(value: String?) {
         if (value != null) CacheManager.put("sourceVariable_$sourceUrl", value)
         else CacheManager.delete("sourceVariable_$sourceUrl")
     }
-    fun putVariable(value: String?): String {
+    open fun putVariable(value: String?): String {
         if (value != null) setVariable(value)
         return value ?: ""
     }
-    fun putVariable(key: String, value: String): String = put(key, value)
+    open fun putVariable(key: String, value: String): String = put(key, value)
 
 
     // ==================== AnalyzeUrl 相关（登录 JS 中通过 java. 调用） ====================
@@ -308,7 +308,7 @@ class LoginJsBridge(
     }
 
     fun setCookie(url: String, cookie: String) {
-        CookieStore.setCookieFromUrl(url, cookie)
+        CookieStore.replaceCookie(url, cookie)
     }
     fun getKey(tag: String, key: String): String = CookieStore.getKey(tag, key)
     fun removeCookie(key: String) = CookieStore.removeCookie(key)
@@ -505,7 +505,7 @@ class LoginJsBridge(
 
     // ==================== 存储 ====================
 
-    fun put(key: String, value: String): String {
+    open fun put(key: String, value: String): String {
         CacheManager.put("v_${sourceUrl}_$key", value)
         try {
             val prefs = activityRef.get()?.getSharedPreferences("legado_login_store", android.content.Context.MODE_PRIVATE)
@@ -514,7 +514,7 @@ class LoginJsBridge(
         return value
     }
 
-    fun get(key: String): String {
+    open fun get(key: String): String {
         CacheManager.get("v_${sourceUrl}_$key")?.let { return it }
         return try {
             val prefs = activityRef.get()?.getSharedPreferences("legado_login_store", android.content.Context.MODE_PRIVATE)

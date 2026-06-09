@@ -219,7 +219,7 @@ object HttpClient {
     fun injectLoginHeader(domain: String, headerMap: Map<String, String>?) {
         headerMap ?: return
         headerMap["Cookie"]?.takeIf { it.isNotBlank() }?.let {
-            CookieStore.setCookie(domain, it)
+            CookieStore.replaceCookie(domain, it)
         }
     }
 }
@@ -236,8 +236,7 @@ private fun Headers.toCaseInsensitiveMultimap(): Map<String, List<String>> {
 private class CookieJarImpl : okhttp3.CookieJar {
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
         val domain = url.host
-        val str = cookies.joinToString("; ") { "${it.name}=${it.value}" }
-        if (str.isNotBlank()) CookieStore.setCookie(domain, str)
+        cookies.forEach { CookieStore.setCookie(domain, "${it.name}=${it.value}") }
     }
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val domain = url.host

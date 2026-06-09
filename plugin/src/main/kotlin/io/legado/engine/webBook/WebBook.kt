@@ -44,7 +44,7 @@ object WebBook {
             if (!loginCheckJs.isNullOrBlank()) {
                 val strResp = StrResponse(raw)
                 val checkResult = analyzeUrl.evalJS(loginCheckJs, strResp)
-                if (checkResult is StrResponse) HttpResponse(checkResult.url, checkResult.body ?: "", checkResult.code)
+                if (checkResult is StrResponse) checkResult.raw
                 else raw
             } else raw
         } catch (throwable: Throwable) {
@@ -54,7 +54,7 @@ object WebBook {
                     val checkResult = analyzeUrl.evalJS(loginCheckJs, errResp)
                     if (checkResult is StrResponse) {
                         if (checkResult.code == 500) throw throwable
-                        HttpResponse(checkResult.url, checkResult.body ?: "", checkResult.code)
+                        checkResult.raw
                     } else throw throwable
                 } catch (_: Throwable) { throw throwable }
             } else throw throwable
@@ -431,6 +431,11 @@ object BookInfo {
             if (!rule.intro.isNullOrBlank()) ar.getString(rule.intro!!).let { if (it.isNotBlank()) book.intro = it }
             if (!rule.kind.isNullOrBlank()) ar.getString(rule.kind!!).let { if (it.isNotBlank()) book.kind = it }
             if (!rule.lastChapter.isNullOrBlank()) ar.getString(rule.lastChapter!!).let { if (it.isNotBlank()) book.latestChapterTitle = it }
+            if (!rule.updateTime.isNullOrBlank()) {
+                ar.getString(rule.updateTime!!).let { value ->
+                    parseUpdateTime(value)?.let { book.latestChapterTime = it }
+                }
+            }
             if (!rule.tocUrl.isNullOrBlank()) ar.getString(rule.tocUrl!!, isUrl = true).let { if (it.isNotBlank()) book.tocUrl = it }
             if (!rule.wordCount.isNullOrBlank()) ar.getString(rule.wordCount!!).let { if (it.isNotBlank()) book.wordCount = it }
             if (book.tocUrl.isBlank()) book.tocUrl = baseUrl
@@ -441,6 +446,31 @@ object BookInfo {
             }
         } catch (e: Exception) { Debug.log("BookInfo error: " + e.message) }
     }
+}
+
+private fun parseUpdateTime(value: String?): Long? {
+    val text = value?.trim().orEmpty()
+    if (text.isBlank()) return null
+    text.toLongOrNull()?.let { number ->
+        return if (number in 1_000_000_000L..9_999_999_999L) number * 1000L else number
+    }
+    val patterns = listOf(
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd HH:mm",
+        "yyyy-MM-dd",
+        "yyyy/MM/dd HH:mm:ss",
+        "yyyy/MM/dd HH:mm",
+        "yyyy/MM/dd",
+        "MM-dd HH:mm",
+        "MM/dd HH:mm"
+    )
+    for (pattern in patterns) {
+        val parsed = runCatching {
+            java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).parse(text)?.time
+        }.getOrNull()
+        if (parsed != null) return parsed
+    }
+    return null
 }
 
 // ==================== BookChapterList ====================

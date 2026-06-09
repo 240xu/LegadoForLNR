@@ -1,4 +1,4 @@
-package io.legado.plugin
+﻿package io.legado.plugin
 
 import android.app.Activity
 import android.content.ClipData
@@ -717,6 +717,7 @@ private fun LegadoWebLoginPanel(
     val loginBridge = remember(source, activity) {
         LoginJsBridge(activity, source.bookSourceUrl, bookSource = source)
     }
+    val loginHeaders = remember(source) { source.getHeaderMap(true) }
     val javaBridge = remember(loginBridge) { LegadoJavaWebBridge(loginBridge) }
     val sourceBridge = remember(loginBridge) { LegadoWebBridge(loginBridge) }
     val cacheBridge = remember { LegadoCacheWebBridge() }
@@ -728,7 +729,9 @@ private fun LegadoWebLoginPanel(
             WebView(context).apply {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
-                settings.userAgentString = io.legado.engine.constant.AppConst.USER_AGENT
+                settings.userAgentString = loginHeaders.entries
+                    .firstOrNull { it.key.equals("User-Agent", true) }
+                    ?.value ?: io.legado.engine.constant.AppConst.USER_AGENT
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 injectStoredCookiesToWebView(loginUrl)
@@ -751,7 +754,7 @@ private fun LegadoWebLoginPanel(
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
                 }
                 if (loginUrl.startsWith("http://") || loginUrl.startsWith("https://")) {
-                    loadUrl(loginUrl)
+                    loadUrl(loginUrl, loginHeaders)
                 } else {
                     val html = injectLegadoWebBootstrap(loginUrl, source.jsLib, source.bookSourceUrl, source.bookSourceUrl)
                     loadDataWithBaseURL(source.bookSourceUrl, html, "text/html", "UTF-8", null)

@@ -1,4 +1,4 @@
-package io.legado.plugin
+﻿package io.legado.plugin
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -900,6 +900,7 @@ class LegadoJsonWebDataSource(
             "kind" to "ruleBookKind",
             "coverUrl" to "ruleCoverUrl",
             "lastChapter" to "ruleBookLastChapter",
+            "updateTime" to "ruleBookUpdateTime",
             "tocUrl" to "ruleChapterUrl",
             "wordCount" to "ruleBookWordCount",
             "canReName" to "ruleBookCanReName",
@@ -1586,7 +1587,8 @@ class LegadoJsonWebDataSource(
 
     private data class ImageOption(
         val style: String? = null,
-        val click: String? = null
+        val click: String? = null,
+        val width: String? = null
     )
 
     private fun extractImageOption(raw: String): ImageOption {
@@ -1597,7 +1599,8 @@ class LegadoJsonWebDataSource(
             ?: return ImageOption()
         return ImageOption(
             style = obj.get("style")?.let(::jsonScalarString)?.takeIf { it.isNotBlank() },
-            click = obj.get("click")?.let(::jsonScalarString)?.takeIf { it.isNotBlank() }
+            click = obj.get("click")?.let(::jsonScalarString)?.takeIf { it.isNotBlank() },
+            width = obj.get("width")?.let(::jsonScalarString)?.takeIf { it.isNotBlank() }
         )
     }
 
@@ -2159,6 +2162,11 @@ class LegadoJsonWebDataSource(
                     addImageComponent(extractImageUrl(element), baseUrl, source, book, chapter)
                     return
                 }
+                "button" -> {
+                    flushText()
+                    addButtonActionComponentIfNeeded(element, baseUrl, source, book, chapter)
+                    return
+                }
                 "br" -> {
                     buffer.append('\n')
                     return
@@ -2186,6 +2194,39 @@ class LegadoJsonWebDataSource(
         body.children().forEach(::visit)
         body.ownText().takeIf { it.isNotBlank() }?.let { buffer.insert(0, "$it\n") }
         flushText()
+    }
+
+    private fun JsonArrayBuilder.addButtonActionComponentIfNeeded(
+        element: Element,
+        baseUrl: String,
+        source: BookSource,
+        book: Book,
+        chapter: BookChapter?
+    ) {
+        val text = element.text().trim()
+        val onclickIndex = text.indexOf("@onclick:", ignoreCase = true)
+        val attrAction = listOf("onclick", "data-onclick", "action")
+            .firstNotNullOfOrNull { key -> element.attr(key).trim().takeIf { it.isNotBlank() } }
+        val action = when {
+            onclickIndex >= 0 -> text.substring(onclickIndex + "@onclick:".length).trim()
+            !attrAction.isNullOrBlank() -> attrAction
+            else -> ""
+        }
+        val label = if (onclickIndex >= 0) text.substring(0, onclickIndex).trim() else text
+        if (action.isBlank()) {
+            addTextComponents(label)
+            return
+        }
+        addCallbackActionComponent(
+            label = label.ifBlank { "执行" },
+            event = "",
+            action = action,
+            baseUrl = baseUrl,
+            source = source,
+            book = book,
+            chapter = chapter,
+            result = ""
+        )
     }
 
     private fun JsonArrayBuilder.addLegadoHtmlComponent(html: String, baseUrl: String, source: BookSource) {
@@ -2254,6 +2295,7 @@ class LegadoJsonWebDataSource(
                 put("uri", uri)
                 put("style", style)
                 put("click", option.click.orEmpty())
+                put("width", option.width.orEmpty())
                 put("src", cleanImageUrl(rawUri, baseUrl))
                 put("headers", buildJsonObject {
                     headers.forEach { (key, value) -> put(key, value) }

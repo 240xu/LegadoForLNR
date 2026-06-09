@@ -361,10 +361,13 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
             loginUrl.startsWith("<js>", true) -> evalUiJs(loginUrl.substring(4, loginUrl.lastIndexOf("<")))?.toString() ?: loginUrl
             else -> loginUrl
         }
+        val loginHeaders = source.getHeaderMap(true)
         webView = WebView(this).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             settings.javaScriptEnabled = true; settings.domStorageEnabled = true
-            settings.userAgentString = io.legado.engine.constant.AppConst.USER_AGENT
+            settings.userAgentString = loginHeaders.entries
+                .firstOrNull { it.key.equals("User-Agent", true) }
+                ?.value ?: io.legado.engine.constant.AppConst.USER_AGENT
             val javaBridge = LegadoJavaWebBridge(loginJsBridge!!)
             val sourceBridge = LegadoWebBridge(loginJsBridge!!)
             val cacheBridge = LegadoCacheWebBridge()
@@ -377,13 +380,16 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     try { view?.evaluateJavascript(legadoWebBootstrapScript(source.jsLib, source.bookSourceUrl, url ?: actualUrl), null) } catch (_: Exception) {}
-                    url?.let { val c = CookieManager.getInstance().getCookie(it); if (!c.isNullOrBlank()) CookieStore.setCookie(source.bookSourceUrl, c) }
+                    url?.let {
+                        val c = CookieManager.getInstance().getCookie(it)
+                        if (!c.isNullOrBlank()) CookieStore.replaceCookie(it, c)
+                    }
                 }
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
             }
             webChromeClient = WebChromeClient()
             if (actualUrl.startsWith("http://") || actualUrl.startsWith("https://")) {
-                loadUrl(actualUrl)
+                loadUrl(actualUrl, loginHeaders)
             } else {
                 val html = injectLegadoWebBootstrap(actualUrl, source.jsLib, source.bookSourceUrl, source.bookSourceUrl)
                 loadDataWithBaseURL(source.bookSourceUrl, html, "text/html", "UTF-8", null)

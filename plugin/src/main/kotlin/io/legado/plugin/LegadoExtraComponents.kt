@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -60,6 +61,7 @@ data class LegadoImageComponentData(
     val uri: String,
     val style: String = "",
     val click: String = "",
+    val width: String = "",
     val src: String = "",
     val headers: Map<String, String> = emptyMap(),
     val sourceJson: String = "",
@@ -99,6 +101,7 @@ class LegadoImageComponent(
         var failed by remember(data.uri, data.headers) { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
         val style = data.style.trim().uppercase()
+        val density = LocalDensity.current
 
         LaunchedEffect(data.uri, data.headers) {
             failed = false
@@ -126,11 +129,12 @@ class LegadoImageComponent(
             val loaded = bitmap
             if (loaded != null) {
                 val ratio = (loaded.width.toFloat() / loaded.height.coerceAtLeast(1)).coerceIn(0.1f, 12f)
+                val widthModifier = imageWidthModifier(data.width, style, loaded.width, density.density)
                 val imageModifier = when (style) {
-                    "FULL", "SINGLE" -> Modifier.fillMaxWidth().aspectRatio(ratio)
-                    "LEFT", "RIGHT" -> Modifier.fillMaxWidth(0.86f).aspectRatio(ratio)
-                    "TEXT" -> Modifier.sizeIn(maxWidth = 72.dp, maxHeight = 56.dp)
-                    else -> Modifier.fillMaxWidth(0.92f).aspectRatio(ratio)
+                    "FULL", "SINGLE" -> widthModifier.fillMaxWidth().aspectRatio(ratio)
+                    "LEFT", "RIGHT" -> widthModifier.aspectRatio(ratio)
+                    "TEXT" -> widthModifier.sizeIn(maxWidth = 72.dp, maxHeight = 56.dp)
+                    else -> widthModifier.aspectRatio(ratio)
                 }.then(
                     if (data.click.isNotBlank()) {
                         Modifier.clickable {
@@ -278,7 +282,7 @@ private fun runLegadoImageClick(data: LegadoImageComponentData) {
     val chapter = parseChapter(data.chapterJson)
     runCatching {
         source.evalJS(data.click) { bindings ->
-            bindings["java"] = LoginJsBridge(null, source.bookSourceUrl, bookSource = source)
+            bindings["java"] = LegadoActionJsBridge(source, book, chapter)
             bindings["book"] = book
             bindings["chapter"] = chapter
             bindings["result"] = data.src.ifBlank { data.uri }
@@ -293,6 +297,13 @@ private fun runLegadoAction(data: LegadoActionComponentData): LegadoActionOutcom
     val chapter = parseChapter(data.chapterJson)
     val scriptOrUrl = data.action.ifBlank { source.getContentRule().callBackJs.orEmpty() }
     if (scriptOrUrl.isBlank()) return LegadoActionOutcome("没有可执行脚本")
+    val directUrl = scriptOrUrl.trim()
+    if (!scriptOrUrl.isExplicitJs() && !scriptOrUrl.contains("{{") && (
+            directUrl.startsWith("http://", true) || directUrl.startsWith("https://", true)
+        )
+    ) {
+        return LegadoActionOutcome("已打开浏览器", directUrl)
+    }
     if (!scriptOrUrl.isExplicitJs() && scriptOrUrl.contains("{{") && scriptOrUrl.contains("}}")) {
         val url = runCatching { resolveLegadoActionUrl(scriptOrUrl, source, book, chapter, data) }.getOrNull()
         if (!url.isNullOrBlank() && (url.startsWith("http://", true) || url.startsWith("https://", true))) {
@@ -347,7 +358,7 @@ private fun putLegadoActionBindings(
     chapter: BookChapter?,
     data: LegadoActionComponentData
 ) {
-    bindings["java"] = LoginJsBridge(null, source.bookSourceUrl, bookSource = source)
+    bindings["java"] = LegadoActionJsBridge(source, book, chapter)
     bindings["event"] = data.event
     bindings["book"] = book
     bindings["chapter"] = chapter
@@ -355,6 +366,65 @@ private fun putLegadoActionBindings(
     bindings["baseUrl"] = data.baseUrl
     bindings["result"] = data.result.takeIf { it.isNotBlank() }
     bindings["src"] = null
+}
+
+private class LegadoActionJsBridge(
+    private val source: BookSource,
+    private val book: Book?,
+    private val chapter: BookChapter?
+) : LoginJsBridge(null, source.bookSourceUrl, bookSource = source) {
+    override fun put(key: String, value: String): String {
+        chapter?.putVariable(key, value)
+        book?.putVariable(key, value)
+        source.put(key, value)
+        return value
+    }
+
+    override fun get(key: String): String {
+        return chapter?.getVariable(key)?.takeIf { it.isNotEmpty() }
+            ?: book?.getVariable(key)?.takeIf { it.isNotEmpty() }
+            ?: source.get(key).takeIf { it.isNotEmpty() }
+            ?: ""
+    }
+
+    override fun putVariable(key: String, value: String): String = put(key, value)
+    override fun getVariable(key: String): String = get(key)
+
+    override fun putVariable(value: String?): String {
+        val safeValue = value.orEmpty()
+        chapter?.putVariable(safeValue)
+        book?.putVariable(safeValue)
+        source.putVariable(safeValue)
+        return safeValue
+    }
+
+    override fun getVariable(): String {
+        return chapter?.getVariableValue()?.takeIf { it.isNotEmpty() }
+            ?: book?.getVariableValue()?.takeIf { it.isNotEmpty() }
+            ?: source.getVariable()
+    }
+}
+
+private fun imageWidthModifier(width: String, style: String, intrinsicPx: Int, density: Float): Modifier {
+    val normalized = width.trim()
+    if (style == "FULL" || style == "SINGLE") return Modifier.fillMaxWidth()
+    if (normalized.endsWith("%")) {
+        val fraction = normalized.dropLast(1).toFloatOrNull()
+            ?.div(100f)
+            ?.coerceIn(0.05f, 1f)
+        if (fraction != null) return Modifier.fillMaxWidth(fraction)
+    }
+    val px = normalized.toFloatOrNull()
+    if (px != null && px > 0f) {
+        return Modifier.sizeIn(maxWidth = (px / density.coerceAtLeast(0.1f)).dp)
+    }
+    val defaultFraction = when (style) {
+        "LEFT", "RIGHT" -> 0.86f
+        "TEXT" -> null
+        else -> 0.92f
+    }
+    return defaultFraction?.let { Modifier.fillMaxWidth(it) }
+        ?: Modifier.sizeIn(maxWidth = intrinsicPx.coerceAtLeast(1).dp)
 }
 
 private fun String.isExplicitJs(): Boolean =
