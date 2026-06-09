@@ -17,8 +17,8 @@ android {
         applicationId = "io.legado.plugin"
         minSdk = 24
         targetSdk = 36
-        versionCode = 18
-        versionName = "1.4.2"
+        versionCode = 19
+        versionName = "1.4.3"
     }
     buildFeatures {
         compose = true

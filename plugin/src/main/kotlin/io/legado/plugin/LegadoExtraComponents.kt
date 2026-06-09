@@ -431,7 +431,7 @@ private fun String.isExplicitJs(): Boolean =
     trimStart().let { it.startsWith("@js:", true) || it.startsWith("<js>", true) }
 
 private fun parseSource(json: String): BookSource? =
-    runCatching { extraGson.fromJson(json, BookSource::class.java) }.getOrNull()
+    LegadoSourceJson.parseSource(json)
 
 private fun parseBook(json: String): Book? =
     runCatching { extraGson.fromJson(json, Book::class.java) }.getOrNull()

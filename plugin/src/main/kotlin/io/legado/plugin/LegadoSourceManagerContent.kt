@@ -35,6 +35,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -71,6 +72,7 @@ import io.legado.engine.rule.UrlOptionParser
 import io.legado.engine.shim.AndroidContext
 import io.legado.engine.shim.CacheManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.mozilla.javascript.Context as RhinoContext
 import org.mozilla.javascript.ScriptableObject
@@ -399,20 +401,52 @@ private fun LegadoLoginDialog(
     val rows = remember(source, resolvedLoginUi) { parseLoginRows(resolvedLoginUi) }
     val rowLabels = remember(source, rows) { mutableStateMapOf<String, String>() }
     var formData by remember(source) { mutableStateOf(source.getLoginInfoMap().toMutableMap()) }
+    val saveFields = remember(source, rows) { mutableStateMapOf<String, Boolean>() }
     var message by remember { mutableStateOf("") }
 
+    fun saveableLoginData(): Map<String, String> {
+        val saved = source.getLoginInfoMap().toMutableMap()
+        rows
+            .filter { it.type != RowUi.Type.button && it.name.isNotBlank() }
+            .forEach { row ->
+                val shouldSave = when (row.type) {
+                    RowUi.Type.text, RowUi.Type.password -> saveFields[row.name] == true
+                    else -> true
+                }
+                if (shouldSave) saved[row.name] = formData[row.name] ?: row.default.orEmpty()
+            }
+        return saved
+    }
+
+    fun persistLoginData(data: Map<String, String>) {
+        if (data.isEmpty()) {
+            source.removeLoginInfo()
+        } else {
+            source.putLoginInfo(managerGson.toJson(data))
+        }
+    }
+
     fun updateData(data: Map<String, Any?>?) {
-        formData = if (data == null) {
-            rows
+        if (data == null) {
+            val defaults = rows
                 .filter { it.type != RowUi.Type.button && it.name.isNotBlank() }
                 .associate { it.name to it.default.orEmpty() }
                 .toMutableMap()
+            formData = defaults
+            persistLoginData(defaults)
         } else {
-            formData.toMutableMap().apply {
+            val updates = data
+                .filterKeys { it.isNotBlank() }
+                .mapValues { (_, value) -> value?.toString().orEmpty() }
+            formData = formData.toMutableMap().apply {
+                putAll(updates)
+            }
+            val saved = source.getLoginInfoMap().toMutableMap().apply {
                 data.forEach { (key, value) ->
                     if (key.isNotBlank()) put(key, value?.toString().orEmpty())
                 }
             }
+            persistLoginData(saved)
         }
     }
 
@@ -501,8 +535,12 @@ private fun LegadoLoginDialog(
                                 row = row,
                                 displayName = rowLabels[row.name] ?: resolveRowDisplayName(row),
                                 value = formData[row.name] ?: row.default.orEmpty(),
+                                saveChecked = saveFields[row.name] == true,
                                 onValueChange = { value ->
                                     formData = formData.toMutableMap().apply { put(row.name, value) }
+                                },
+                                onSaveCheckedChange = { checked ->
+                                    saveFields[row.name] = checked
                                 },
                                 onAction = { isLongClick -> runAction(row.action, defaultLogin = false, isLongClick = isLongClick) }
                             )
@@ -511,7 +549,7 @@ private fun LegadoLoginDialog(
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
-                            source.putLoginInfo(managerGson.toJson(formData))
+                            persistLoginData(saveableLoginData())
                             runAction(null, defaultLogin = true)
                         }
                     ) {
@@ -546,7 +584,7 @@ private fun LegadoLoginDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                source.putLoginInfo(managerGson.toJson(formData))
+                persistLoginData(saveableLoginData())
                 onStatus("登录信息已保存")
                 onDismiss()
             }) {
@@ -568,29 +606,50 @@ private fun LoginRow(
     row: RowUi,
     displayName: String,
     value: String,
+    saveChecked: Boolean,
     onValueChange: (String) -> Unit,
+    onSaveCheckedChange: (Boolean) -> Unit,
     onAction: (Boolean) -> Unit
 ) {
     when (row.type) {
         RowUi.Type.password, RowUi.Type.text -> {
-            OutlinedTextField(
-                modifier = modifier,
-                value = value,
-                onValueChange = { newValue ->
-                    onValueChange(newValue)
-                    // Legado 20260131: text/password 类型支持 action 键，
-                    // 用户完成输入后自动执行对应 JS
-                    if (!row.action.isNullOrBlank()) {
-                        onAction(false)
-                    }
-                },
-                label = { Text(displayName) },
-                visualTransformation = if (row.type == RowUi.Type.password) {
-                    PasswordVisualTransformation()
-                } else {
-                    VisualTransformation.None
+            var hasUserInput by remember(row.name) { mutableStateOf(false) }
+            LaunchedEffect(value, hasUserInput, row.action) {
+                if (hasUserInput && !row.action.isNullOrBlank()) {
+                    delay(600L)
+                    onAction(false)
                 }
-            )
+            }
+            Column(modifier = modifier) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = value,
+                    onValueChange = { newValue ->
+                        hasUserInput = true
+                        onValueChange(newValue)
+                    },
+                    label = { Text(displayName) },
+                    visualTransformation = if (row.type == RowUi.Type.password) {
+                        PasswordVisualTransformation()
+                    } else {
+                        VisualTransformation.None
+                    }
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = saveChecked,
+                        onCheckedChange = onSaveCheckedChange
+                    )
+                    Text(
+                        text = "保存",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
         RowUi.Type.toggle -> {
             val onValue = row.chars?.getOrNull(1) ?: "true"
@@ -777,7 +836,6 @@ private fun executeLoginJs(
 ) {
     Thread {
         try {
-            source.putLoginInfo(managerGson.toJson(formData))
             val bridge = LoginJsBridge(
                 activity = activity,
                 sourceUrl = source.bookSourceUrl,

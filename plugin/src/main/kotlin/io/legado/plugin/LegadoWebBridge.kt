@@ -171,7 +171,7 @@ private fun parseBridgeHeaders(headers: String?): Map<String, String> {
 }
 
 fun parseLegadoHtmlSource(sourceJson: String): BookSource? =
-    runCatching { Gson().fromJson(sourceJson, BookSource::class.java) }.getOrNull()
+    LegadoSourceJson.parseSource(sourceJson)
 
 fun resolveLegadoWebJsLib(source: BookSource): String = resolveLegadoWebJsLib(source.jsLib)
 

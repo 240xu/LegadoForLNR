@@ -66,7 +66,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
         btnSave = Button(this).apply { text = "\u4fdd\u5b58\u767b\u5f55\u4fe1\u606f"; visibility = View.GONE; setOnClickListener { saveAndFinish() } }
         btnBack.setOnClickListener { onBackPressed() }
         val json = intent.getStringExtra(EXTRA_SOURCE_JSON) ?: run { finish(); return }
-        source = try { gson.fromJson(json, BookSource::class.java) } catch (_: Exception) { null } ?: run { finish(); return }
+        source = LegadoSourceJson.parseSource(json) ?: run { finish(); return }
         val src = source!!
         tvTitle.text = "\u767b\u5f55 - ${src.bookSourceName.ifBlank { src.bookSourceUrl }}"
         loginJsBridge = LoginJsBridge(this, src.bookSourceUrl, this, src)
