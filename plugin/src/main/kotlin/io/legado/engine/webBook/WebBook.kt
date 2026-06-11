@@ -14,6 +14,8 @@ import io.legado.engine.shim.fromJsonObject
 
 object WebBook {
 
+    private const val MAX_FOLLOW_URLS = 200
+
     private fun applyRateLimit(bookSource: BookSource) {
         val rate = bookSource.getEffectiveConcurrentRate()
         if (!rate.isNullOrBlank()) {
@@ -25,15 +27,24 @@ object WebBook {
      * Aligned with lyc486: execute request and check loginCheckJs
      * loginCheckJs acts as post-processing script, receives StrResponse as result
      */
-    fun executeWithLoginCheck(bookSource: BookSource, analyzeUrl: AnalyzeUrl): HttpResponse {
+    fun executeWithLoginCheck(
+        bookSource: BookSource,
+        analyzeUrl: AnalyzeUrl,
+        jsStr: String? = null,
+        sourceRegex: String? = null
+    ): HttpResponse {
         applyRateLimit(bookSource)
         val loginCheckJs = bookSource.loginCheckJs
         val response = try {
-            val raw = analyzeUrl.execute()
+            val raw = if (!jsStr.isNullOrBlank() || !sourceRegex.isNullOrBlank()) {
+                analyzeUrl.getStrResponse(jsStr, sourceRegex)
+            } else {
+                analyzeUrl.execute()
+            }
             if (!loginCheckJs.isNullOrBlank()) {
                 val strResp = StrResponse(raw)
                 val checkResult = analyzeUrl.evalJS(loginCheckJs, strResp)
-                if (checkResult is StrResponse) HttpResponse(checkResult.url, checkResult.body ?: "", checkResult.code)
+                if (checkResult is StrResponse) checkResult.raw
                 else raw
             } else raw
         } catch (throwable: Throwable) {
@@ -43,7 +54,7 @@ object WebBook {
                     val checkResult = analyzeUrl.evalJS(loginCheckJs, errResp)
                     if (checkResult is StrResponse) {
                         if (checkResult.code == 500) throw throwable
-                        HttpResponse(checkResult.url, checkResult.body ?: "", checkResult.code)
+                        checkResult.raw
                     } else throw throwable
                 } catch (_: Throwable) { throw throwable }
             } else throw throwable
@@ -100,8 +111,13 @@ object WebBook {
 
     // ==================== Explore ====================
 
-    fun exploreBookAwait(bookSource: BookSource, url: String, page: Int? = 1): ArrayList<SearchBook> {
-        val analyzeUrl = AnalyzeUrl(mUrl = url, page = page, baseUrl = bookSource.bookSourceUrl, source = bookSource)
+    fun exploreBookAwait(
+        bookSource: BookSource,
+        url: String,
+        page: Int? = 1,
+        infoMap: MutableMap<String, String>? = null
+    ): ArrayList<SearchBook> {
+        val analyzeUrl = AnalyzeUrl(mUrl = url, page = page, baseUrl = bookSource.bookSourceUrl, source = bookSource, infoMap = infoMap)
         val res = executeWithLoginCheck(bookSource, analyzeUrl)
         val exploreRule = bookSource.getExploreRule()
         val rule = if (exploreRule.bookList.isNullOrBlank()) bookSource.getSearchRule() else exploreRule
@@ -125,21 +141,40 @@ object WebBook {
         // Aligned with lyc486: use standalone runPreUpdateJs
         runPreUpdateJs(bookSource, book)
         val allChapters = mutableListOf<BookChapter>()
-        var currentUrl: String? = book.tocUrl?.ifBlank { book.bookUrl } ?: book.bookUrl
-        var pageCount = 0
-        while (currentUrl != null && pageCount < 20) {
-            val analyzeUrl = AnalyzeUrl(mUrl = currentUrl!!, baseUrl = book.bookUrl, source = bookSource, ruleData = book)
+        val startUrl = book.tocUrl?.ifBlank { book.bookUrl } ?: book.bookUrl
+        val visited = linkedSetOf<String>()
+
+        fun fetchPage(pageUrl: String): Pair<HttpResponse, Pair<List<BookChapter>, List<String>>> {
+            val analyzeUrl = AnalyzeUrl(mUrl = pageUrl, baseUrl = book.bookUrl, source = bookSource, ruleData = book)
             val res = executeWithLoginCheck(bookSource, analyzeUrl)
-            val chapters = BookChapterList.analyzeChapterList(bookSource, book, res.url, res.body, rule)
-            allChapters.addAll(chapters)
-            currentUrl = if (!rule.nextTocUrl.isNullOrBlank()) {
-                val ar = AnalyzeRule(source = bookSource).setContent(res.body, res.url)
-                val next = ar.getString(rule.nextTocUrl!!)
-                if (next.isNotBlank() && next != currentUrl) AnalyzeUrl.getAbsoluteURL(res.url, next) else null
-            } else null
-            pageCount++
+            visited.add(pageUrl)
+            visited.add(res.url)
+            val pageData = BookChapterList.analyzeChapterPage(bookSource, book, res.url, res.url, res.body, rule)
+            return res to pageData
         }
-        return allChapters
+
+        val queue = java.util.ArrayDeque<String>()
+        val (firstRes, firstPage) = fetchPage(startUrl)
+        allChapters.addAll(firstPage.first)
+        firstPage.second
+            .filterNextUrls(firstRes.url, visited)
+            .forEach(queue::add)
+
+        while (queue.isNotEmpty() && visited.size < MAX_FOLLOW_URLS) {
+            val nextUrl = queue.removeFirst()
+            if (nextUrl.isBlank() || visited.contains(nextUrl)) continue
+            val (res, page) = try {
+                fetchPage(nextUrl)
+            } catch (_: Exception) {
+                continue
+            }
+            allChapters.addAll(page.first)
+            page.second
+                .filterNextUrls(res.url, visited)
+                .forEach(queue::add)
+        }
+
+        return BookChapterList.finalizeChapterList(allChapters, book)
     }
 
     // ==================== Content ====================
@@ -160,33 +195,59 @@ object WebBook {
             Debug.log(bookSource.bookSourceUrl, "First-level TOC content does not parse rules")
             return bookChapter.tag ?: ""
         }
-        val baseUrl = bookChapter.url
-        val redirectUrl = baseUrl
+        val baseUrl = bookChapter.getAbsoluteURL()
         val body: String
+        val redirectUrl: String
         // Aligned with lyc486: use tocHtml when chapterUrl == bookUrl
         if (bookChapter.url == book.bookUrl && !book.tocHtml.isNullOrEmpty()) {
             body = book.tocHtml!!
+            redirectUrl = baseUrl
         } else {
             val analyzeUrl = AnalyzeUrl(mUrl = baseUrl, baseUrl = book.tocUrl ?: "", source = bookSource, ruleData = book, chapter = bookChapter)
-            val res = executeWithLoginCheck(bookSource, analyzeUrl)
-            body = if (!contentRule.sourceRegex.isNullOrBlank()) {
-                try { Regex(contentRule.sourceRegex!!).find(res.body)?.value ?: res.body } catch (_: Exception) { res.body }
-            } else res.body
+            val res = executeWithLoginCheck(bookSource, analyzeUrl, contentRule.webJs, contentRule.sourceRegex)
+            body = res.body
+            redirectUrl = res.url
         }
-        // Parse content
-        val ar = AnalyzeRule(source = bookSource).setContent(body, baseUrl)
+        val ar = AnalyzeRule(ruleData = book, source = bookSource).setContent(body, baseUrl)
+        ar.setRedirectUrl(redirectUrl)
         ar.setChapter(bookChapter)
-        // webJs post-processing
-        var processedBody = body
-        if (!contentRule.webJs.isNullOrBlank()) {
-            ar.evalJS(contentRule.webJs!!, body)?.toString()?.takeIf { it.isNotBlank() }?.let { webBody ->
-                processedBody = webBody
-                ar.setContent(processedBody, baseUrl).setChapter(bookChapter)
-            }
-        }
+        ar.setNextChapterUrl(nextChapterUrl)
         val allParts = mutableListOf<String>()
-        // Main content
-        allParts.addAll(ar.getStringList(contentRule.content ?: "") ?: emptyList())
+
+        val firstPage = analyzeContentPage(book, bookSource, bookChapter, contentRule, baseUrl, redirectUrl, body, nextChapterUrl)
+        allParts.add(firstPage.first)
+
+        val visited = linkedSetOf(baseUrl, redirectUrl)
+        val queue = java.util.ArrayDeque<String>()
+        firstPage.second
+            .filterNextUrls(redirectUrl, visited)
+            .forEach(queue::add)
+
+        while (queue.isNotEmpty() && visited.size < MAX_FOLLOW_URLS) {
+            val nextUrl = queue.removeFirst()
+            if (nextUrl.isBlank() || visited.contains(nextUrl)) continue
+            visited.add(nextUrl)
+            try {
+                val nextAnalyzeUrl = AnalyzeUrl(mUrl = nextUrl, source = bookSource, ruleData = book, chapter = bookChapter)
+                val nextRes = executeWithLoginCheck(bookSource, nextAnalyzeUrl, contentRule.webJs, contentRule.sourceRegex)
+                visited.add(nextRes.url)
+                val nextPage = analyzeContentPage(
+                    book,
+                    bookSource,
+                    bookChapter,
+                    contentRule,
+                    nextUrl,
+                    nextRes.url,
+                    nextRes.body,
+                    nextChapterUrl
+                )
+                allParts.add(nextPage.first)
+                nextPage.second
+                    .filterNextUrls(nextRes.url, visited)
+                    .forEach(queue::add)
+            } catch (_: Exception) {}
+        }
+
         // Sub content
         if (!contentRule.subContent.isNullOrBlank()) {
             val subContent = ar.getString(contentRule.subContent!!)
@@ -201,20 +262,7 @@ object WebBook {
                 }
             }
         }
-        // Multi-page content (nextContentUrl)
-        if (!contentRule.nextContentUrl.isNullOrBlank()) {
-            val nextUrls = ar.getStringList(contentRule.nextContentUrl!!, isUrl = true) ?: emptyList()
-            for (nextUrl in nextUrls) {
-                if (nextUrl.isBlank() || nextUrl == baseUrl) continue
-                try {
-                    val absUrl = AnalyzeUrl.getAbsoluteURL(redirectUrl, nextUrl)
-                    val nextRes = AnalyzeUrl(mUrl = absUrl, source = bookSource, ruleData = book, chapter = bookChapter).getStrResponse()
-                    val nextAr = AnalyzeRule(source = bookSource).setContent(nextRes.body ?: "", nextRes.url).setChapter(bookChapter)
-                    allParts.addAll(nextAr.getStringList(contentRule.content ?: "") ?: emptyList())
-                } catch (_: Exception) {}
-            }
-        }
-        var contentStr = allParts.joinToString("\n")
+        var contentStr = allParts.filter { it.isNotBlank() }.joinToString("\n")
         // replaceRegex - Aligned with lyc486: use analyzeRule.getString to execute replace rules
         if (!contentRule.replaceRegex.isNullOrBlank()) {
             try {
@@ -230,6 +278,37 @@ object WebBook {
             } catch (_: Exception) {}
         }
         return contentStr
+    }
+
+    private fun analyzeContentPage(
+        book: Book,
+        bookSource: BookSource,
+        bookChapter: BookChapter,
+        contentRule: ContentRule,
+        baseUrl: String,
+        redirectUrl: String,
+        body: String,
+        nextChapterUrl: String?
+    ): Pair<String, List<String>> {
+        val ar = AnalyzeRule(ruleData = book, source = bookSource).setContent(body, baseUrl)
+        ar.setRedirectUrl(redirectUrl)
+        ar.setChapter(bookChapter)
+        ar.setNextChapterUrl(nextChapterUrl)
+        val content = ar.getString(contentRule.content, unescape = false)
+        val nextUrls = if (!contentRule.nextContentUrl.isNullOrBlank()) {
+            ar.getStringList(contentRule.nextContentUrl!!, isUrl = true).orEmpty()
+        } else {
+            emptyList()
+        }
+        return content to nextUrls
+    }
+
+    private fun List<String>.filterNextUrls(currentUrl: String, visited: Set<String>): List<String> {
+        return asSequence()
+            .map { AnalyzeUrl.getAbsoluteURL(currentUrl, it.trim()) }
+            .filter { it.isNotBlank() && it != currentUrl && !visited.contains(it) }
+            .distinct()
+            .toList()
     }
 
     // ==================== Helper: replaceRegex application ====================
@@ -262,17 +341,30 @@ object BookList {
         val books = ArrayList<SearchBook>()
         try {
             val ar = AnalyzeRule(source = bookSource).setContent(body, baseUrl)
+            ar.setRedirectUrl(baseUrl)
+            if (isSearch && bookSource.bookUrlPattern?.takeIf { it.isNotBlank() }?.let { pattern ->
+                    runCatching { Regex(pattern).matches(baseUrl) }.getOrDefault(false)
+                } == true
+            ) {
+                parseInfoItem(bookSource, analyzeUrl, baseUrl, body)?.let(books::add)
+                return books
+            }
             // Aligned with lyc486: support -/+ prefix list reversal
             var listRule = rule.bookList ?: ""
             var reverse = false
             if (listRule.startsWith("-")) { reverse = true; listRule = listRule.substring(1) }
             if (listRule.startsWith("+")) { listRule = listRule.substring(1) }
             val elements = ar.getElements(listRule)
+            if (elements.isEmpty() && bookSource.bookUrlPattern.isNullOrBlank()) {
+                parseInfoItem(bookSource, analyzeUrl, baseUrl, body)?.let(books::add)
+                return books
+            }
             val items = if (reverse) elements.reversed() else elements
             for (element in items) {
                 try {
                     val searchBook = SearchBook(origin = bookSource.bookSourceUrl, originName = bookSource.bookSourceName)
                     val itemAr = AnalyzeRule(ruleData = searchBook, source = bookSource).setContent(element, baseUrl)
+                    itemAr.setRedirectUrl(baseUrl)
                     val name = itemAr.getString(rule.name ?: "").trim()
                     val author = itemAr.getString(rule.author ?: "").trim()
                     val bookUrl = itemAr.getString(rule.bookUrl ?: "", isUrl = true).trim()
@@ -289,8 +381,28 @@ object BookList {
                     books.add(searchBook)
                 } catch (_: Exception) {}
             }
+            val deduped = LinkedHashSet(books)
+            books.clear()
+            books.addAll(deduped)
         } catch (e: Exception) { Debug.log("BookList error: " + e.message) }
         return books
+    }
+
+    private fun parseInfoItem(
+        bookSource: BookSource,
+        analyzeUrl: AnalyzeUrl,
+        baseUrl: String,
+        body: String
+    ): SearchBook? {
+        val book = Book(
+            bookUrl = baseUrl.ifBlank { analyzeUrl.url },
+            origin = bookSource.bookSourceUrl,
+            originName = bookSource.bookSourceName,
+            originOrder = bookSource.customOrder
+        )
+        BookInfo.analyzeBookInfo(bookSource, book, baseUrl, body, bookSource.getBookInfoRule(), false)
+        if (book.name.isBlank()) return null
+        return SearchBook.fromBook(book).also { it.infoHtml = body }
     }
 }
 
@@ -319,6 +431,11 @@ object BookInfo {
             if (!rule.intro.isNullOrBlank()) ar.getString(rule.intro!!).let { if (it.isNotBlank()) book.intro = it }
             if (!rule.kind.isNullOrBlank()) ar.getString(rule.kind!!).let { if (it.isNotBlank()) book.kind = it }
             if (!rule.lastChapter.isNullOrBlank()) ar.getString(rule.lastChapter!!).let { if (it.isNotBlank()) book.latestChapterTitle = it }
+            if (!rule.updateTime.isNullOrBlank()) {
+                ar.getString(rule.updateTime!!).let { value ->
+                    parseUpdateTime(value)?.let { book.latestChapterTime = it }
+                }
+            }
             if (!rule.tocUrl.isNullOrBlank()) ar.getString(rule.tocUrl!!, isUrl = true).let { if (it.isNotBlank()) book.tocUrl = it }
             if (!rule.wordCount.isNullOrBlank()) ar.getString(rule.wordCount!!).let { if (it.isNotBlank()) book.wordCount = it }
             if (book.tocUrl.isBlank()) book.tocUrl = baseUrl
@@ -329,6 +446,31 @@ object BookInfo {
             }
         } catch (e: Exception) { Debug.log("BookInfo error: " + e.message) }
     }
+}
+
+private fun parseUpdateTime(value: String?): Long? {
+    val text = value?.trim().orEmpty()
+    if (text.isBlank()) return null
+    text.toLongOrNull()?.let { number ->
+        return if (number in 1_000_000_000L..9_999_999_999L) number * 1000L else number
+    }
+    val patterns = listOf(
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd HH:mm",
+        "yyyy-MM-dd",
+        "yyyy/MM/dd HH:mm:ss",
+        "yyyy/MM/dd HH:mm",
+        "yyyy/MM/dd",
+        "MM-dd HH:mm",
+        "MM/dd HH:mm"
+    )
+    for (pattern in patterns) {
+        val parsed = runCatching {
+            java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).parse(text)?.time
+        }.getOrNull()
+        if (parsed != null) return parsed
+    }
+    return null
 }
 
 // ==================== BookChapterList ====================
@@ -347,9 +489,23 @@ object BookChapterList {
         body: String,
         rule: io.legado.engine.data.rule.TocRule
     ): List<BookChapter> {
+        return finalizeChapterList(analyzeChapterPage(bookSource, book, baseUrl, baseUrl, body, rule).first, book)
+    }
+
+    fun analyzeChapterPage(
+        bookSource: BookSource,
+        book: Book,
+        baseUrl: String,
+        redirectUrl: String,
+        body: String,
+        rule: io.legado.engine.data.rule.TocRule,
+        getNextUrl: Boolean = true
+    ): Pair<List<BookChapter>, List<String>> {
         val chapters = mutableListOf<BookChapter>()
+        val nextUrls = mutableListOf<String>()
         try {
-            val ar = AnalyzeRule(source = bookSource).setContent(body, baseUrl)
+            val ar = AnalyzeRule(ruleData = book, source = bookSource).setContent(body, baseUrl)
+            ar.setRedirectUrl(redirectUrl)
             // Aligned with lyc486: support -/+ prefix
             var listRule = rule.chapterList ?: ""
             var reverse = false
@@ -357,13 +513,17 @@ object BookChapterList {
             if (listRule.startsWith("+")) { listRule = listRule.substring(1) }
             val elements = ar.getElements(listRule)
             val items = if (reverse) elements.reversed() else elements
+            if (getNextUrl && !rule.nextTocUrl.isNullOrBlank()) {
+                nextUrls.addAll(ar.getStringList(rule.nextTocUrl!!, isUrl = true).orEmpty())
+            }
             for ((index, element) in items.withIndex()) {
                 try {
                     val itemAr = AnalyzeRule(ruleData = book, source = bookSource).setContent(element, baseUrl)
+                    itemAr.setRedirectUrl(redirectUrl)
                     val chName = itemAr.getString(rule.chapterName ?: "").trim()
                     val chUrl = itemAr.getString(rule.chapterUrl ?: "", isUrl = true).trim()
                     if (chName.isBlank() && chUrl.isBlank()) continue
-                    val absUrl = AnalyzeUrl.getAbsoluteURL(baseUrl, chUrl)
+                    val absUrl = if (chUrl.isNotBlank()) AnalyzeUrl.getAbsoluteURL(redirectUrl, chUrl) else redirectUrl
                     var finalTitle = chName
                     if (!rule.formatJs.isNullOrBlank()) {
                         try {
@@ -373,7 +533,7 @@ object BookChapterList {
                         } catch (_: Exception) {}
                     }
                     val info = itemAr.getString(rule.updateTime ?: "").trim()
-                    val ch = BookChapter(bookUrl = book.bookUrl, url = absUrl, title = finalTitle.ifBlank { "unknown" }, index = index, baseUrl = baseUrl)
+                    val ch = BookChapter(bookUrl = book.bookUrl, title = finalTitle.ifBlank { "unknown" }, index = index, baseUrl = redirectUrl)
                     // Aligned with lyc486: isVolume parsing
                     if (!rule.isVolume.isNullOrBlank()) {
                         val isVolumeStr = itemAr.getString(rule.isVolume!!)
@@ -391,6 +551,11 @@ object BookChapterList {
                         val payStr = itemAr.getString(rule.isPay!!)
                         if (payStr == "true" || payStr == "1") ch.isPay = true
                     }
+                    ch.url = when {
+                        chUrl.isNotBlank() -> absUrl
+                        ch.isVolume -> ch.title + index
+                        else -> redirectUrl
+                    }
                     if (!ch.isVolume) {
                         if (info.isNotBlank()) {
                             wordCountRegex.find(info)?.let { match ->
@@ -403,8 +568,20 @@ object BookChapterList {
                 } catch (_: Exception) {}
             }
         } catch (e: Exception) { Debug.log("BookChapterList error: " + e.message) }
-        upChapterInfo(chapters, book)
-        return chapters
+        return chapters to nextUrls
+    }
+
+    fun finalizeChapterList(list: List<BookChapter>, book: Book): List<BookChapter> {
+        val deduped = LinkedHashSet(list).toMutableList()
+        deduped.forEachIndexed { index, chapter -> chapter.index = index }
+        upChapterInfo(deduped, book)
+        if (deduped.isNotEmpty()) {
+            book.totalChapterNum = deduped.size
+            book.latestChapterTitle = deduped.last().title
+            book.durChapterTitle = deduped.getOrElse(book.durChapterIndex) { deduped.first() }.title
+            book.lastCheckTime = System.currentTimeMillis()
+        }
+        return deduped
     }
 
     private fun upChapterInfo(list: List<BookChapter>, book: Book) {

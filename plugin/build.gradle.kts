@@ -17,8 +17,8 @@ android {
         applicationId = "io.legado.plugin"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 20
+        versionName = "1.4.4"
     }
     buildFeatures {
         compose = true
@@ -31,11 +31,6 @@ android {
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
-    }
-    packaging {
-        resources {
-            excludes += "META-INF/INDEX.LIST"
-        }
     }
     packaging {
         resources {
@@ -64,7 +59,12 @@ androidComponents {
 tasks.withType<KotlinJvmCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
-        freeCompilerArgs.add("-opt-in=kotlin.RequiresOptIn")
+        freeCompilerArgs.addAll(
+            listOf(
+                "-opt-in=kotlin.RequiresOptIn",
+                "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+            )
+        )
     }
 }
 
@@ -100,6 +100,7 @@ dependencies {
     implementation("com.jayway.jsonpath:json-path:2.10.0")
     implementation("cn.wanghaomiao:JsoupXpath:2.5.3")
     implementation("cn.hutool:hutool-crypto:5.8.22")
+    implementation("org.dom4j:dom4j:2.2.0")
     implementation(libs.jsoup)
 
     //LNR Api
@@ -115,7 +116,7 @@ fun pluginApk(): File =
     File(layout.buildDirectory.asFile.get(), "outputs/apk/debug")
         .walkTopDown()
         .first {
-            it.isFile && it.name.endsWith(".apk") || it.name.endsWith(".lnrp")
+            it.isFile && (it.name.endsWith(".apk") || it.name.endsWith(".lnrp"))
         }
 
 fun installPluginTask(name: String, hostPkg: String) {

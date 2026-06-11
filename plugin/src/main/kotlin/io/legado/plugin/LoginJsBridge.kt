@@ -21,6 +21,7 @@ import io.legado.engine.http.HttpResponse
 import io.legado.engine.http.StrResponse
 import io.legado.engine.model.RowUi
 import io.legado.engine.js.JsExtensions
+import io.legado.engine.js.SourceOpenCallback
 import io.legado.engine.rule.AnalyzeUrl
 import io.legado.engine.rule.UrlOptionParser
 import io.legado.engine.shim.CacheManager
@@ -41,7 +42,7 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * 对应 Legado 的 SourceLoginJsExtensions
  */
-class LoginJsBridge(
+open class LoginJsBridge(
     activity: Activity? = null,
     private val sourceUrl: String,
     private val callback: Callback? = null,
@@ -136,7 +137,8 @@ class LoginJsBridge(
         val headerMap = try {
             com.google.gson.Gson().fromJson<Map<String, String>>(header, object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type)
         } catch (_: Exception) { null }
-        headerMap?.get("Cookie")?.let { CookieStore.replaceCookie(sourceUrl, it) }
+        val cookie = headerMap?.get("Cookie") ?: headerMap?.get("cookie")
+        cookie?.let { CookieStore.replaceCookie(sourceUrl, it) }
         try {
             CacheManager.put("loginHeader_$sourceUrl", header)
             val prefs = activityRef.get()?.getSharedPreferences("legado_login_info", android.content.Context.MODE_PRIVATE)
@@ -174,17 +176,17 @@ class LoginJsBridge(
     }
 
     /** source.getVariable() / source.putVariable() */
-    fun getVariable(): String = CacheManager.get("sourceVariable_$sourceUrl") ?: ""
-    fun getVariable(key: String): String = get(key)
-    fun setVariable(value: String?) {
+    open fun getVariable(): String = CacheManager.get("sourceVariable_$sourceUrl") ?: ""
+    open fun getVariable(key: String): String = get(key)
+    open fun setVariable(value: String?) {
         if (value != null) CacheManager.put("sourceVariable_$sourceUrl", value)
         else CacheManager.delete("sourceVariable_$sourceUrl")
     }
-    fun putVariable(value: String?): String {
+    open fun putVariable(value: String?): String {
         if (value != null) setVariable(value)
         return value ?: ""
     }
-    fun putVariable(key: String, value: String): String = put(key, value)
+    open fun putVariable(key: String, value: String): String = put(key, value)
 
 
     // ==================== AnalyzeUrl 相关（登录 JS 中通过 java. 调用） ====================
@@ -203,15 +205,17 @@ class LoginJsBridge(
      * 返回访问结果（文本类型），书源内部重新登录后可调用此方法重新返回结果。
      * 对应 Legado java.getStrResponse()
      */
-    fun getStrResponse(): String {
+    fun getStrResponse(): io.legado.engine.http.StrResponse {
         return try {
             val url = currentAnalyzeUrl ?: AnalyzeUrl(loginUrl ?: sourceUrl, source = bookSource)
-            url.getStrResponse().body
+            io.legado.engine.http.StrResponse(url.getStrResponse())
         } catch (e: Exception) {
             android.util.Log.e("LoginJsBridge", "getStrResponse error", e)
-            ""
+            io.legado.engine.http.StrResponse(io.legado.engine.http.HttpResponse(sourceUrl, e.message ?: "", 500))
         }
     }
+
+    fun getStrResponseBody(): String = getStrResponse().body().orEmpty()
 
     /**
      * 返回访问结果（HttpResponse），调用登录后在调用这方法可以重新访问。
@@ -291,6 +295,7 @@ class LoginJsBridge(
 
     fun open(type: String, url: String, title: String) {
         Debug.log("LoginJsBridge.open($type, $url, $title)")
+        SourceOpenCallback.onOpen(type, url, title)
     }
 
     // ==================== 字符串工具 ====================
@@ -305,7 +310,7 @@ class LoginJsBridge(
     }
 
     fun setCookie(url: String, cookie: String) {
-        CookieStore.setCookieFromUrl(url, cookie)
+        CookieStore.replaceCookie(url, cookie)
     }
     fun getKey(tag: String, key: String): String = CookieStore.getKey(tag, key)
     fun removeCookie(key: String) = CookieStore.removeCookie(key)
@@ -314,12 +319,12 @@ class LoginJsBridge(
 
     fun upLoginData(data: Any?) {
         val map = data.toAnyMap()
-        activityRef.get()?.runOnUiThread { callback?.upLoginData(map) }
+        runOnUi { callback?.upLoginData(map) }
     }
 
     fun reLoginView() { reLoginView(false) }
     fun reLoginView(deltaUp: Boolean) {
-        activityRef.get()?.runOnUiThread { callback?.reLoginView(deltaUp) }
+        runOnUi { callback?.reLoginView(deltaUp) }
     }
 
     // ==================== 工具方法 ====================
@@ -449,7 +454,7 @@ class LoginJsBridge(
 
     /** 刷新发现页 */
     fun refreshExplore() {
-        activityRef.get()?.runOnUiThread { callback?.reLoginView(false) }
+        runOnUi { callback?.reLoginView(false) }
     }
 
     /** 刷新书籍信息 */
@@ -502,7 +507,7 @@ class LoginJsBridge(
 
     // ==================== 存储 ====================
 
-    fun put(key: String, value: String): String {
+    open fun put(key: String, value: String): String {
         CacheManager.put("v_${sourceUrl}_$key", value)
         try {
             val prefs = activityRef.get()?.getSharedPreferences("legado_login_store", android.content.Context.MODE_PRIVATE)
@@ -511,7 +516,7 @@ class LoginJsBridge(
         return value
     }
 
-    fun get(key: String): String {
+    open fun get(key: String): String {
         CacheManager.get("v_${sourceUrl}_$key")?.let { return it }
         return try {
             val prefs = activityRef.get()?.getSharedPreferences("legado_login_store", android.content.Context.MODE_PRIVATE)
@@ -527,6 +532,15 @@ class LoginJsBridge(
             is NativeObject -> headers.toAnyMap().orEmpty().mapValues { it.value?.toString().orEmpty() }
             is String -> UrlOptionParser.parseHeaders(headers)
             else -> emptyMap()
+        }
+    }
+
+    private fun runOnUi(block: () -> Unit) {
+        val activity = activityRef.get()
+        if (activity != null) {
+            activity.runOnUiThread(block)
+        } else {
+            Handler(Looper.getMainLooper()).post(block)
         }
     }
 
@@ -648,14 +662,20 @@ class LoginJsBridge(
             // 把插件 CookieStore 中已有的 cookie 注入 WebView
             val preSyncUrl = url.takeIf { it.startsWith("http://") || it.startsWith("https://") }
                 ?: sourceUrl.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-            preSyncUrl?.let { injectStoredCookies(it) }
-            webView.addJavascriptInterface(this@LoginJsBridge, "java")
+            preSyncUrl?.let { injectStoredCookiesToWebView(it) }
+            val javaBridge = LegadoJavaWebBridge(this@LoginJsBridge)
+            val sourceBridge = LegadoWebBridge(this@LoginJsBridge)
+            val cacheBridge = LegadoCacheWebBridge()
+            webView.addJavascriptInterface(javaBridge, "java")
+            webView.addJavascriptInterface(sourceBridge, "source")
+            webView.addJavascriptInterface(cacheBridge, "cache")
             webView.webChromeClient = WebChromeClient()
             webView.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, pageUrl: String?) {
                     super.onPageFinished(view, pageUrl)
                     if (!pageUrl.isNullOrBlank()) currentUrl.set(pageUrl)
                     syncCookies(pageUrl)
+                    view?.evaluateJavascript(legadoWebBootstrapScript(bookSource?.jsLib, sourceUrl, pageUrl ?: url), null)
                     preloadJs?.takeIf { it.isNotBlank() }?.let { view?.evaluateJavascript(it, null) }
                 }
 
@@ -685,20 +705,6 @@ class LoginJsBridge(
             }
         }
         return result.get()
-    }
-
-    /**
-     * 把插件 CookieStore 中某域名的 cookie 注入 Android WebView CookieManager，
-     * 使 WebView loadUrl 时能自动携带已登录的 cookie。
-     */
-    private fun injectStoredCookies(targetUrl: String) {
-        try {
-            val stored = CookieStore.getCookieHeader(targetUrl)["Cookie"]
-            if (!stored.isNullOrBlank()) {
-                CookieManager.getInstance().setCookie(targetUrl, stored)
-                CookieManager.getInstance().flush()
-            }
-        } catch (_: Exception) {}
     }
 
     private fun decodeJsString(value: String?): String {

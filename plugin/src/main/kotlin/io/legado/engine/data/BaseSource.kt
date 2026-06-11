@@ -81,7 +81,8 @@ interface BaseSource : JsExtensions {
     }
     fun putLoginHeader(header: String) {
         val headerMap = GSON.fromJsonObject<Map<String, String>>(header)
-        headerMap?.get("Cookie")?.let { CookieStore.replaceCookie(getKey(), it) }
+        val cookie = headerMap?.get("Cookie") ?: headerMap?.get("cookie")
+        cookie?.let { CookieStore.replaceCookie(getKey(), it) }
         CacheManager.put("loginHeader_" + getKey(), header)
     }
     fun removeLoginHeader() { CacheManager.delete("loginHeader_" + getKey()); CookieStore.removeCookie(getKey()) }

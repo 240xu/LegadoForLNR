@@ -24,6 +24,7 @@ class StrResponse(val raw: HttpResponse) {
     fun bodyString(): String = body ?: ""
     fun url(): String = url
     fun code(): Int = code
+    fun raw(): HttpResponse = raw
     fun header(name: String): String = raw.header(name)
     fun isSuccessful(): Boolean = raw.isSuccessful()
     fun message(): String = ""

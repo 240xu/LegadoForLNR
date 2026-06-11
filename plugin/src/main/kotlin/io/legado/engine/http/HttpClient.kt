@@ -3,6 +3,7 @@ package io.legado.engine.http
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import io.legado.engine.shim.AppConfig
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -32,7 +33,7 @@ object HttpClient {
                 val request = chain.request()
                 val builder = request.newBuilder()
                 if (request.header("User-Agent") == null) {
-                    builder.addHeader("User-Agent", "io.legado.engine.shim.AppConfig.userAgent")
+                    builder.addHeader("User-Agent", AppConfig.userAgent)
                 }
                 builder.addHeader("Keep-Alive", "300")
                 builder.addHeader("Connection", "Keep-Alive")
@@ -147,10 +148,29 @@ object HttpClient {
         dnsIp: String? = null,
         timeoutMillis: Long? = null
     ): ByteArray {
+        return requestBytes("GET", url, null, headers, proxy, dnsIp, timeoutMillis)
+    }
+
+    fun requestBytes(
+        method: String,
+        url: String,
+        body: String? = null,
+        headers: Map<String, String> = emptyMap(),
+        proxy: String? = null,
+        dnsIp: String? = null,
+        timeoutMillis: Long? = null
+    ): ByteArray {
         val merged = buildHeaders(url, headers)
-        val builder = Request.Builder().url(url).get()
+        val mediaType = resolveMediaType(merged)
+        val builder = Request.Builder().url(url)
+        when (method.uppercase()) {
+            "POST" -> builder.post((body ?: "").toRequestBody(mediaType))
+            "HEAD" -> builder.head()
+            else -> builder.get()
+        }
         merged.forEach { (k, v) -> builder.addHeader(k, v) }
         val resp = clientFor(proxy, dnsIp, timeoutMillis).newCall(builder.build()).execute()
+        saveCookies(resp)
         return resp.body?.bytes() ?: ByteArray(0)
     }
 
@@ -159,7 +179,7 @@ object HttpClient {
         merged.putAll(CookieStore.getCookieHeader(url))
         merged.putAll(custom)
         if (!merged.containsKey("User-Agent") && !merged.containsKey("user-agent")) {
-            merged["User-Agent"] = "io.legado.engine.shim.AppConfig.userAgent"
+            merged["User-Agent"] = AppConfig.userAgent
         }
         return merged
     }
@@ -218,7 +238,7 @@ object HttpClient {
     fun injectLoginHeader(domain: String, headerMap: Map<String, String>?) {
         headerMap ?: return
         headerMap["Cookie"]?.takeIf { it.isNotBlank() }?.let {
-            CookieStore.setCookie(domain, it)
+            CookieStore.replaceCookie(domain, it)
         }
     }
 }
@@ -235,8 +255,7 @@ private fun Headers.toCaseInsensitiveMultimap(): Map<String, List<String>> {
 private class CookieJarImpl : okhttp3.CookieJar {
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
         val domain = url.host
-        val str = cookies.joinToString("; ") { "${it.name}=${it.value}" }
-        if (str.isNotBlank()) CookieStore.setCookie(domain, str)
+        cookies.forEach { CookieStore.setCookie(domain, "${it.name}=${it.value}") }
     }
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val domain = url.host
@@ -259,4 +278,10 @@ data class HttpResponse(
 ) {
     fun header(name: String): String = headers[name]?.firstOrNull() ?: headers[name.lowercase()]?.firstOrNull() ?: ""
     fun isSuccessful(): Boolean = code in 200..299
+    fun request(): RequestInfo = RequestInfo(url)
+}
+
+class RequestInfo(private val requestUrl: String) {
+    fun url(): String = requestUrl
+    override fun toString(): String = requestUrl
 }
