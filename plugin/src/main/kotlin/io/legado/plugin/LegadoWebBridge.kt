@@ -38,7 +38,7 @@ class LegadoJavaWebBridge(
     @JavascriptInterface fun head(url: String, headers: String, timeout: Int): String =
         runCatching { Gson().toJson(HttpClient.head(url, parseBridgeHeaders(headers), timeoutMillis = timeout.toLong()).headers) }
             .getOrDefault("{}")
-    @JavascriptInterface fun getStrResponse(): String = delegate.getStrResponse()
+    @JavascriptInterface fun getStrResponse(): String = delegate.getStrResponseBody()
     @JavascriptInterface fun initUrl() = delegate.initUrl()
     @JavascriptInterface fun open(type: String, url: String, title: String) = delegate.open(type, url, title)
     @JavascriptInterface fun open(url: String) = delegate.open("url", url, url)
@@ -103,7 +103,7 @@ class LegadoWebBridge(
     @JavascriptInterface fun post(url: String, body: String?, headers: String?): String = delegate.post(url, body, headers)
     @JavascriptInterface fun connect(url: String): String = delegate.connect(url).body().orEmpty()
     @JavascriptInterface fun connect(url: String, headers: String?): String = delegate.connect(url, headers).body().orEmpty()
-    @JavascriptInterface fun getStrResponse(): String = delegate.getStrResponse()
+    @JavascriptInterface fun getStrResponse(): String = delegate.getStrResponseBody()
     @JavascriptInterface fun initUrl() = delegate.initUrl()
     @JavascriptInterface fun open(type: String, url: String, title: String) = delegate.open(type, url, title)
     @JavascriptInterface fun open(url: String) = delegate.open("url", url, url)

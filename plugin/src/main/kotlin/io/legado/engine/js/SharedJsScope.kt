@@ -29,22 +29,8 @@ object SharedJsScope {
         if (scope == null) {
             scope = RhinoScriptEngine.getRuntimeScope(ScriptBindings())
             try {
-                if (jsLib.trimStart().startsWith("{")) {
-                    // JSON格式: {"name":"url", ...}
-                    val jsMap: Map<String, String>? = GSON.fromJsonObject<Map<String, String>>(jsLib)
-                    jsMap?.values?.forEach { value ->
-                        if (value.startsWith("http://") || value.startsWith("https://")) {
-                            val js = downloadJs(value)
-                            if (js != null) {
-                                RhinoScriptEngine.eval(js, scope)
-                            } else {
-                                Debug.log("jsLib download failed: $value")
-                            }
-                        }
-                    }
-                } else {
-                    // 直接JS代码
-                    RhinoScriptEngine.eval(jsLib, scope)
+                resolveScripts(jsLib).forEach { js ->
+                    RhinoScriptEngine.eval(js, scope)
                 }
                 // 阻止新全局变量创建（函数内未用var的隐性全局变量）
                 if (scope is ScriptableObject) {
@@ -58,6 +44,44 @@ object SharedJsScope {
         return scope
     }
 
+    /**
+     * 将 jsLib 的共享全局变量补到本次脚本的当前作用域。
+     *
+     * 大多数规则可以通过 shared scope 的 prototype 读取 jsLib；loginUi 的按钮/输入动作还会
+     * 混入 loginUrl 中的函数、result 表单数据和 java 回调。这里不重复执行 jsLib，而是从
+     * 已缓存的共享 scope 复制可枚举的全局函数/变量，避免同名 const/let 重复声明。
+     */
+    fun evalInto(jsLib: String?, scope: Scriptable): Boolean {
+        val sharedScope = getScope(jsLib) ?: return false
+        var injected = false
+        sharedScope.ids.forEach { id ->
+            try {
+                when (id) {
+                    is String -> {
+                        if (scope.has(id, scope)) return@forEach
+                        val value = ScriptableObject.getProperty(sharedScope, id)
+                        if (value != Scriptable.NOT_FOUND) {
+                            ScriptableObject.putProperty(scope, id, value)
+                            injected = true
+                        }
+                    }
+                    is Number -> {
+                        val index = id.toInt()
+                        if (scope.has(index, scope)) return@forEach
+                        val value = ScriptableObject.getProperty(sharedScope, index)
+                        if (value != Scriptable.NOT_FOUND) {
+                            ScriptableObject.putProperty(scope, index, value)
+                            injected = true
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Debug.log("jsLib evalInto copy error: ${e.message}")
+            }
+        }
+        return injected
+    }
+
     fun remove(jsLib: String?) {
         if (jsLib.isNullOrBlank()) return
         val key = md5(jsLib)
@@ -69,6 +93,27 @@ object SharedJsScope {
                 jsFileCache.remove(md5(value))
             }
         }
+    }
+
+    private fun resolveScripts(jsLib: String): List<String> {
+        if (jsLib.trimStart().startsWith("{")) {
+            val jsMap: Map<String, String>? = try {
+                GSON.fromJsonObject<Map<String, String>>(jsLib)
+            } catch (_: Exception) {
+                null
+            }
+            return jsMap?.values?.mapNotNull { value ->
+                if (value.startsWith("http://") || value.startsWith("https://")) {
+                    downloadJs(value) ?: run {
+                        Debug.log("jsLib download failed: $value")
+                        null
+                    }
+                } else {
+                    null
+                }
+            }.orEmpty()
+        }
+        return listOf(jsLib)
     }
 
     private fun downloadJs(url: String): String? {

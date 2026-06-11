@@ -71,6 +71,7 @@ import io.legado.engine.model.RowUi
 import io.legado.engine.rule.UrlOptionParser
 import io.legado.engine.shim.AndroidContext
 import io.legado.engine.shim.CacheManager
+import io.legado.engine.shim.GSON
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -870,6 +871,7 @@ private fun executeLoginJs(
                 formData.forEach { (key, value) -> ScriptableObject.putProperty(resultObj, key, value) }
                 ScriptableObject.putProperty(scope, "result", resultObj)
                 cx.evaluateString(scope, "result.get=function(key){return result[key] || '';};", "result_get", 1, null)
+                SharedJsScope.evalInto(source.jsLib, scope)
                 if (loginJs.isNotBlank()) {
                     cx.evaluateString(scope, loginJs, "login_js", 1, null)
                 }
@@ -918,6 +920,7 @@ private fun evalLoginUiValue(
             formData.forEach { (key, value) -> ScriptableObject.putProperty(resultObj, key, value) }
             ScriptableObject.putProperty(scope, "result", resultObj)
             cx.evaluateString(scope, "result.get=function(key){return result[key] || '';};", "result_get", 1, null)
+            SharedJsScope.evalInto(source.jsLib, scope)
             val loginJs = source.getLoginJs().orEmpty()
             if (loginJs.isNotBlank()) {
                 cx.evaluateString(scope, loginJs, "login_js", 1, null)
@@ -957,7 +960,7 @@ private fun parseLoginRows(loginUi: String): List<RowUi> {
     if (loginUi.isBlank()) return emptyList()
     return try {
         val type = object : TypeToken<List<RowUi>>() {}.type
-        managerGson.fromJson<List<RowUi>>(loginUi, type) ?: emptyList()
+        GSON.fromJson<List<RowUi>>(loginUi, type) ?: emptyList()
     } catch (_: Exception) {
         emptyList()
     }

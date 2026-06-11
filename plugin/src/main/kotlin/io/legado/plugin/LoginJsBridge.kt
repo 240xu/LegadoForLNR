@@ -205,15 +205,17 @@ open class LoginJsBridge(
      * 返回访问结果（文本类型），书源内部重新登录后可调用此方法重新返回结果。
      * 对应 Legado java.getStrResponse()
      */
-    fun getStrResponse(): String {
+    fun getStrResponse(): io.legado.engine.http.StrResponse {
         return try {
             val url = currentAnalyzeUrl ?: AnalyzeUrl(loginUrl ?: sourceUrl, source = bookSource)
-            url.getStrResponse().body
+            io.legado.engine.http.StrResponse(url.getStrResponse())
         } catch (e: Exception) {
             android.util.Log.e("LoginJsBridge", "getStrResponse error", e)
-            ""
+            io.legado.engine.http.StrResponse(io.legado.engine.http.HttpResponse(sourceUrl, e.message ?: "", 500))
         }
     }
+
+    fun getStrResponseBody(): String = getStrResponse().body().orEmpty()
 
     /**
      * 返回访问结果（HttpResponse），调用登录后在调用这方法可以重新访问。

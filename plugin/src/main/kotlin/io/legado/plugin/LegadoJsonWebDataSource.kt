@@ -803,9 +803,8 @@ class LegadoJsonWebDataSource(
             val file = File(context.filesDir, "legado_sources.json")
             if (file.exists()) {
                 val json = file.readText()
-                val type = object : TypeToken<List<BookSource>>() {}.type
                 bookSources.clear()
-                bookSources.addAll(gson.fromJson(json, type) ?: emptyList<BookSource>())
+                bookSources.addAll(LegadoSourceJson.parseSources(json))
             }
         } catch (_: Exception) {}
     }
@@ -1295,20 +1294,14 @@ class LegadoJsonWebDataSource(
      * 返回: "https://example.com/img.png"
      */
     private fun stripLegadoImageParams(raw: String): String {
-        val value = raw.trim()
-        val match = Regex(",\\s*\\{[\\s\\S]*}\$").find(value)
-        if (match != null) {
-            return value.substring(0, match.range.first).trim()
-        }
-        return value
+        return UrlOptionParser.split(raw).first
     }
 
     /**
      * 从 img src 中提取 Legado 图片参数 JSON 字符串。返回 null 表示无参数。
      */
     private fun extractLegadoImageParams(raw: String): String? {
-        val match = Regex(",\\s*(\\{[\\s\\S]*})\$").find(raw.trim())
-        return match?.groupValues?.getOrNull(1)
+        return UrlOptionParser.split(raw).second
     }
 
     private data class ImageOption(

@@ -18,6 +18,7 @@ import android.widget.*
 import io.legado.engine.http.CookieStore
 import io.legado.engine.data.BookSource
 import io.legado.engine.shim.CacheManager
+import io.legado.engine.shim.GSON
 import io.legado.engine.model.RowUi
 import com.google.gson.Gson
 import io.legado.plugin.R
@@ -82,7 +83,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
         useWebViewMode = false; scrollForm.visibility = View.VISIBLE; webviewContainer.visibility = View.GONE
         val actualJson = resolveLoginUiJson(loginUiStr)
         val type = object : TypeToken<List<RowUi>>() {}.type
-        rowUis = try { gson.fromJson(actualJson, type) } catch (_: Exception) { null }
+        rowUis = try { GSON.fromJson(actualJson, type) } catch (_: Exception) { null }
         if (rowUis.isNullOrEmpty()) { Toast.makeText(this, "loginUi \u89e3\u6790\u5931\u8d25", Toast.LENGTH_SHORT).show(); finish(); return }
         val savedInfo = getLoginInfo(source)
         val cl = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)) }
@@ -200,21 +201,27 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
 
     // ==================== JS \u6267\u884c\u4e0a\u4e0b\u6587 ====================
 
-    private fun buildLoginScope(bridge: LoginJsBridge): Pair<RhinoContext, org.mozilla.javascript.Scriptable> {
+    private fun buildLoginScope(
+        bridge: LoginJsBridge,
+        formDataSnapshot: Map<String, String> = collectFormData()
+    ): Pair<RhinoContext, org.mozilla.javascript.Scriptable> {
         val cx = RhinoContext.enter(); cx.optimizationLevel = -1; val scope = cx.initStandardObjects()
-        bridge.loginData = collectFormData().toMutableMap()
+        bridge.loginData = formDataSnapshot.toMutableMap()
         ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
         ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
         ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
         ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
         ScriptableObject.putProperty(scope, "book", null)
         ScriptableObject.putProperty(scope, "chapter", null)
+        ScriptableObject.putProperty(scope, "baseUrl", source?.bookSourceUrl ?: "")
         ScriptableObject.putProperty(scope, "loginUrl", source?.loginUrl ?: "")
         val sharedScope = source?.jsLib?.let { io.legado.engine.js.SharedJsScope.getScope(it) }
         if (sharedScope != null) { scope.prototype = sharedScope }
         val resultObj = cx.newObject(scope)
-        collectFormData().forEach { (k, v) -> ScriptableObject.putProperty(resultObj, k, v) }
+        formDataSnapshot.forEach { (k, v) -> ScriptableObject.putProperty(resultObj, k, v) }
         ScriptableObject.putProperty(scope, "result", resultObj)
+        cx.evaluateString(scope, "result.get=function(key){return result[key] || '';};", "result_get", 1, null)
+        source?.jsLib?.let { io.legado.engine.js.SharedJsScope.evalInto(it, scope) }
         return Pair(cx, scope)
     }
 
@@ -266,11 +273,12 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
         when {
             action.startsWith("http://") || action.startsWith("https://") -> { try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(action))) } catch (_: Exception) {} }
             else -> {
+                val snapshot = collectFormData()
                 Thread {
                     try {
                         val bridge = loginJsBridge ?: LoginJsBridge(this, src.bookSourceUrl, this, src)
                         val loginJs = src.getLoginJs() ?: ""
-                        val (cx, scope) = buildLoginScope(bridge)
+                        val (cx, scope) = buildLoginScope(bridge, snapshot)
                         ScriptableObject.putProperty(scope, "isLongClick", isLongClick)
                         try { cx.evaluateString(scope, "$loginJs\n$action", "btn_${rowUi.name}", 1, null) } finally { RhinoContext.exit() }
                     } catch (e: Exception) { runOnUiThread { Toast.makeText(this, "\u6309\u94ae ${rowUi.name} \u6267\u884c\u5931\u8d25: ${e.message}", Toast.LENGTH_LONG).show() } }
@@ -329,11 +337,11 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
         if (isJs) {
             Thread {
                 val newJson = resolveLoginUiJson(loginUiStr); val type = object : TypeToken<List<RowUi>>() {}.type
-                val newUis = try { gson.fromJson<List<RowUi>>(newJson, type) } catch (_: Exception) { null }
+                val newUis = try { GSON.fromJson<List<RowUi>>(newJson, type) } catch (_: Exception) { null }
                 runOnUiThread { doUpdate(newUis) }
             }.start()
         } else {
-            val newUis = try { gson.fromJson<List<RowUi>>(loginUiStr, object : TypeToken<List<RowUi>>() {}.type) } catch (_: Exception) { null }
+            val newUis = try { GSON.fromJson<List<RowUi>>(loginUiStr, object : TypeToken<List<RowUi>>() {}.type) } catch (_: Exception) { null }
             doUpdate(newUis)
         }
     }
@@ -365,7 +373,55 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
         try { val m = getLoginInfo(source).toMutableMap().apply { putAll(data) }; val p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE); val j = gson.toJson(m); p.edit().putString("info_${source.bookSourceUrl}", j).apply(); source.putLoginInfo(j) } catch (_: Exception) {}
     }
 
-    private fun saveAndFinish() { val src = source ?: return; val d = collectSaveableData(); if (d.isNotEmpty()) saveLoginInfo(src, d); Toast.makeText(this, "\u767b\u5f55\u4fe1\u606f\u5df2\u4fdd\u5b58", Toast.LENGTH_SHORT).show(); finish() }
+    private fun saveAndFinish() {
+        val src = source ?: return
+        val loginData = getLoginInfo(src).toMutableMap().apply { putAll(collectFormData()) }
+        val saved = getLoginInfo(src).toMutableMap().apply { putAll(collectSaveableData()) }
+        if (saved.isEmpty()) {
+            src.removeLoginInfo()
+        } else {
+            saveLoginInfo(src, saved)
+        }
+        executeDefaultLoginAndFinish(src, loginData)
+    }
+
+    private fun executeDefaultLoginAndFinish(src: BookSource, loginData: Map<String, String>) {
+        Thread {
+            val loginJs = src.getLoginJs().orEmpty()
+            if (loginJs.isBlank()) {
+                runOnUiThread {
+                    Toast.makeText(this, "\u767b\u5f55\u4fe1\u606f\u5df2\u4fdd\u5b58", Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+                return@Thread
+            }
+            try {
+                val bridge = loginJsBridge ?: LoginJsBridge(this, src.bookSourceUrl, this, src)
+                bridge.loginData = loginData.toMutableMap()
+                val (cx, scope) = buildLoginScope(bridge, loginData)
+                ScriptableObject.putProperty(scope, "isLongClick", false)
+                try {
+                    cx.evaluateString(
+                        scope,
+                        "$loginJs\nif(typeof login==='function'){login.apply(this);}else{throw('Function login not implements!!!');}",
+                        "login_default",
+                        1,
+                        null
+                    )
+                    runOnUiThread {
+                        Toast.makeText(this, "\u767b\u5f55\u4fe1\u606f\u5df2\u4fdd\u5b58\u5e76\u6267\u884c login()", Toast.LENGTH_SHORT).show()
+                        finish()
+                    }
+                } finally {
+                    RhinoContext.exit()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "\u767b\u5f55\u811a\u672c\u6267\u884c\u5931\u8d25: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
 
     private fun updateViewNameButtons() {
         val uis = rowUis ?: return
