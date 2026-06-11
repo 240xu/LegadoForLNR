@@ -37,10 +37,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 登录 JS 桥接
- * 在 loginUrl / loginUi 的 JS 中通过 java.xxx() 调用
+ * 鐧诲綍 JS 妗ユ帴
+ * 鍦?loginUrl / loginUi 鐨?JS 涓€氳繃 java.xxx() 璋冪敤
  *
- * 对应 Legado 的 SourceLoginJsExtensions
+ * 瀵瑰簲 Legado 鐨?SourceLoginJsExtensions
  */
 open class LoginJsBridge(
     activity: Activity? = null,
@@ -50,7 +50,7 @@ open class LoginJsBridge(
 ) {
     private val activityRef: WeakReference<Activity> = WeakReference(activity)
 
-    /** 登录数据 (表单提交时 result 变量) */
+    /** 鐧诲綍鏁版嵁 (琛ㄥ崟鎻愪氦鏃?result 鍙橀噺) */
     var loginData: MutableMap<String, String> = mutableMapOf()
 
     val bookSourceUrl: String get() = bookSource?.bookSourceUrl ?: sourceUrl
@@ -69,7 +69,7 @@ open class LoginJsBridge(
         fun reLoginView(deltaUp: Boolean)
     }
 
-    // ==================== source 对象方法 ====================
+    // ==================== source 瀵硅薄鏂规硶 ====================
 
     /** source.getKey() */
     fun getKey(): String = sourceUrl
@@ -77,12 +77,12 @@ open class LoginJsBridge(
     /** source.getTag() */
     fun getTag(): String = sourceUrl
 
-    /** source.login() - 调用登录函数 */
+    /** source.login() - 璋冪敤鐧诲綍鍑芥暟 */
     fun login() {
-        // 在 LoginActivity 中通过 Rhino 执行 login()
+        // 鍦?LoginActivity 涓€氳繃 Rhino 鎵ц login()
     }
 
-    /** source.getLoginInfo() - 对齐 lyc486 AES 解密 */
+    /** source.getLoginInfo() - 瀵归綈 lyc486 AES 瑙ｅ瘑 */
     fun getLoginInfo(): String? {
         return try {
             CacheManager.get("userInfo_$sourceUrl")?.let { cache ->
@@ -165,7 +165,7 @@ open class LoginJsBridge(
         CookieStore.removeCookie(sourceUrl)
     }
 
-    /** source.getHeaderMap() - 返回 source header + loginHeader + UA */
+    /** source.getHeaderMap() - 杩斿洖 source header + loginHeader + UA */
     fun getHeaderMap(): Map<String, String> {
         val merged = mutableMapOf<String, String>()
         bookSource?.getHeaderMap(true)?.let { merged.putAll(it) }
@@ -189,21 +189,21 @@ open class LoginJsBridge(
     open fun putVariable(key: String, value: String): String = put(key, value)
 
 
-    // ==================== AnalyzeUrl 相关（登录 JS 中通过 java. 调用） ====================
+    // ==================== AnalyzeUrl 鐩稿叧锛堢櫥褰?JS 涓€氳繃 java. 璋冪敤锛?====================
 
     private var currentAnalyzeUrl: AnalyzeUrl? = null
 
     /**
-     * 重新解析 url，用于登录检测 JS 登录后重新解析 url 重新访问。
-     * 对应 Legado java.initUrl()
+     * 閲嶆柊瑙ｆ瀽 url锛岀敤浜庣櫥褰曟娴?JS 鐧诲綍鍚庨噸鏂拌В鏋?url 閲嶆柊璁块棶銆?
+     * 瀵瑰簲 Legado java.initUrl()
      */
     fun initUrl() {
         currentAnalyzeUrl?.initUrl()
     }
 
     /**
-     * 返回访问结果（文本类型），书源内部重新登录后可调用此方法重新返回结果。
-     * 对应 Legado java.getStrResponse()
+     * 杩斿洖璁块棶缁撴灉锛堟枃鏈被鍨嬶級锛屼功婧愬唴閮ㄩ噸鏂扮櫥褰曞悗鍙皟鐢ㄦ鏂规硶閲嶆柊杩斿洖缁撴灉銆?
+     * 瀵瑰簲 Legado java.getStrResponse()
      */
     fun getStrResponse(): io.legado.engine.http.StrResponse {
         return try {
@@ -218,8 +218,8 @@ open class LoginJsBridge(
     fun getStrResponseBody(): String = getStrResponse().body().orEmpty()
 
     /**
-     * 返回访问结果（HttpResponse），调用登录后在调用这方法可以重新访问。
-     * 对应 Legado java.getResponse()
+     * 杩斿洖璁块棶缁撴灉锛圚ttpResponse锛夛紝璋冪敤鐧诲綍鍚庡湪璋冪敤杩欐柟娉曞彲浠ラ噸鏂拌闂€?
+     * 瀵瑰簲 Legado java.getResponse()
      */
     fun getResponse(): io.legado.engine.http.HttpResponse {
         return try {
@@ -231,7 +231,7 @@ open class LoginJsBridge(
         }
     }
 
-    // ==================== HTTP 请求 ====================
+    // ==================== HTTP 璇锋眰 ====================
 
     fun ajax(url: Any): String {
         val urlStr = url.toString()
@@ -263,7 +263,7 @@ open class LoginJsBridge(
     }
 
     
-    // ==================== HTTP 连接 ====================
+    // ==================== HTTP 杩炴帴 ====================
 
     fun connect(urlStr: String): io.legado.engine.http.StrResponse {
         return try {
@@ -286,23 +286,23 @@ open class LoginJsBridge(
         }
     }
 
-    // ==================== 字节转换 ====================
+    // ==================== 瀛楄妭杞崲 ====================
 
     fun strToBytes(str: String, charset: String = "UTF-8"): ByteArray = str.toByteArray(charset(charset))
     fun bytesToStr(bytes: ByteArray, charset: String = "UTF-8"): String = String(bytes, charset(charset))
 
-    // ==================== 多功能跳转 ====================
+    // ==================== 澶氬姛鑳借烦杞?====================
 
     fun open(type: String, url: String, title: String) {
         Debug.log("LoginJsBridge.open($type, $url, $title)")
         SourceOpenCallback.onOpen(type, url, title)
     }
 
-    // ==================== 字符串工具 ====================
+    // ==================== 瀛楃涓插伐鍏?====================
 
     fun encodeURI(str: String): String = java.net.URLEncoder.encode(str, "UTF-8")
     fun decodeURI(str: String): String = java.net.URLDecoder.decode(str, "UTF-8")
-    // ==================== Cookie 操作 ====================
+    // ==================== Cookie 鎿嶄綔 ====================
 
     fun getCookie(url: String): String {
         val domain = try { java.net.URL(url).host } catch (_: Exception) { url }
@@ -315,7 +315,41 @@ open class LoginJsBridge(
     fun getKey(tag: String, key: String): String = CookieStore.getKey(tag, key)
     fun removeCookie(key: String) = CookieStore.removeCookie(key)
 
-    // ==================== 登录 UI 回调 ====================
+    fun replaceCookie(url: String, cookie: String) = CookieStore.replaceCookie(url, cookie)
+
+    fun base64DecodeToByteArray(str: String): ByteArray = java.util.Base64.getDecoder().decode(str)
+
+    fun timeFormatUTC(time: Long, format: String, offset: Long): String {
+        val sdf = java.text.SimpleDateFormat(format, java.util.Locale.US)
+        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        sdf.timeZone.rawOffset = offset.toInt()
+        return sdf.format(java.util.Date(time))
+    }
+
+    fun webView(html: String?, url: String?, js: String?): String? {
+        // WebView 鎵ц JS 骞惰繑鍥炵粨鏋?
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val result = java.util.concurrent.atomic.AtomicReference<String?>()
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                val ctx = activityRef.get() ?: io.legado.engine.shim.AndroidContext.appCtx; val webView = android.webkit.WebView(ctx)
+                webView.settings.javaScriptEnabled = true
+                webView.webViewClient = object : android.webkit.WebViewClient() {
+                    override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
+                        view?.evaluateJavascript(js ?: "", { value -> result.set(value); latch.countDown() })
+                    }
+                }
+                when {
+                    !html.isNullOrBlank() -> webView.loadDataWithBaseURL(url ?: "", html, "text/html", "UTF-8", null)
+                    !url.isNullOrBlank() -> webView.loadUrl(url)
+                    else -> latch.countDown()
+                }
+            } catch (e: Exception) { latch.countDown() }
+        }
+        latch.await(30, java.util.concurrent.TimeUnit.SECONDS)
+        return result.get()
+    }
+    // ==================== 鐧诲綍 UI 鍥炶皟 ====================
 
     fun upLoginData(data: Any?) {
         val map = data.toAnyMap()
@@ -327,7 +361,7 @@ open class LoginJsBridge(
         runOnUi { callback?.reLoginView(deltaUp) }
     }
 
-    // ==================== 工具方法 ====================
+    // ==================== 宸ュ叿鏂规硶 ====================
 
     fun toast(msg: Any?) {
         activityRef.get()?.runOnUiThread { Toast.makeText(activityRef.get(), msg?.toString() ?: "", Toast.LENGTH_SHORT).show() }
@@ -413,6 +447,15 @@ open class LoginJsBridge(
             java.util.Base64.getEncoder().encodeToString(cipher.doFinal(data.toByteArray()))
         } catch (_: Exception) { null }
     }
+    fun tripleDESDecodeArgsBase64Str(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance("DESede//")
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), "DESede")
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec)
+            String(cipher.doFinal(java.util.Base64.getDecoder().decode(data)))
+        } catch (_: Exception) { null }
+    }
     fun desDecodeToString(data: String, key: String, mode: String, padding: String, iv: String): String? {
         return try {
             val cipher = javax.crypto.Cipher.getInstance("DES/$mode/$padding")
@@ -442,7 +485,7 @@ open class LoginJsBridge(
     fun currentTimeMillis(): Long = System.currentTimeMillis()
 
 
-    /** 获取登录数据 (对应 Legado 中的 result 变量) */
+    /** 鑾峰彇鐧诲綍鏁版嵁 (瀵瑰簲 Legado 涓殑 result 鍙橀噺) */
     @android.webkit.JavascriptInterface
     fun fetchLoginData(): MutableMap<String, String> = loginData
 
@@ -450,29 +493,29 @@ open class LoginJsBridge(
     fun androidId(): String = "legado_lnr_plugin"
 
 
-    // ==================== SourceLoginJsExtensions 补充方法 ====================
+    // ==================== SourceLoginJsExtensions 琛ュ厖鏂规硶 ====================
 
-    /** 刷新发现页 */
+    /** 鍒锋柊鍙戠幇椤?*/
     fun refreshExplore() {
         runOnUi { callback?.reLoginView(false) }
     }
 
-    /** 刷新书籍信息 */
+    /** 鍒锋柊涔︾睄淇℃伅 */
     fun refreshBookInfo() {
         android.util.Log.d("LegadoLogin", "refreshBookInfo called")
     }
 
-    /** 刷新目录 */
+    /** 鍒锋柊鐩綍 */
     fun refreshBookToc() {
         android.util.Log.d("LegadoLogin", "refreshBookToc called")
     }
 
-    /** 刷新正文 */
+    /** 鍒锋柊姝ｆ枃 */
     fun refreshContent() {
         android.util.Log.d("LegadoLogin", "refreshContent called")
     }
 
-    /** 复制文本到剪贴板 */
+    /** 澶嶅埗鏂囨湰鍒板壀璐存澘 */
     fun copyText(text: String) {
         activityRef.get()?.runOnUiThread {
             val clipboard = activityRef.get()?.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
@@ -481,7 +524,7 @@ open class LoginJsBridge(
         }
     }
 
-    /** 显示内置浏览器 */
+    /** 鏄剧ず鍐呯疆娴忚鍣?*/
     fun showBrowser(url: String, html: String? = null, preloadJs: String? = null, config: String? = null) {
         openBrowserDialog(url, "浏览器", html, preloadJs, waitForResult = false)
     }
@@ -505,7 +548,7 @@ open class LoginJsBridge(
         return try { HttpClient.get(path).body } catch (_: Exception) { "" }
     }
 
-    // ==================== 存储 ====================
+    // ==================== 瀛樺偍 ====================
 
     open fun put(key: String, value: String): String {
         CacheManager.put("v_${sourceUrl}_$key", value)
@@ -524,7 +567,7 @@ open class LoginJsBridge(
         } catch (_: Exception) { "" }
     }
 
-    // ==================== 辅助 ====================
+    // ==================== 杈呭姪 ====================
 
     private fun parseHeaders(headers: Any?): Map<String, String> {
         return when (headers) {
@@ -641,11 +684,11 @@ open class LoginJsBridge(
                 maxLines = 1
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             toolbar.addView(Button(activity).apply {
-                text = "完成"
+                text = "瀹屾垚"
                 setOnClickListener { finishWithWebContent(200) }
             })
             toolbar.addView(Button(activity).apply {
-                text = "关闭"
+                text = "鍏抽棴"
                 setOnClickListener {
                     runCatching { dialog.dismiss() }
                     complete(result.get())
@@ -659,7 +702,7 @@ open class LoginJsBridge(
             webView.settings.userAgentString = io.legado.engine.constant.AppConst.USER_AGENT
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-            // 把插件 CookieStore 中已有的 cookie 注入 WebView
+            // 鎶婃彃浠?CookieStore 涓凡鏈夌殑 cookie 娉ㄥ叆 WebView
             val preSyncUrl = url.takeIf { it.startsWith("http://") || it.startsWith("https://") }
                 ?: sourceUrl.takeIf { it.startsWith("http://") || it.startsWith("https://") }
             preSyncUrl?.let { injectStoredCookiesToWebView(it) }
@@ -723,5 +766,22 @@ open class LoginJsBridge(
             else -> ""
         }
         return StrResponse(HttpResponse(url, body, 200))
+    }
+
+    fun readTxtFile(path: String): String {
+        return try {
+            val file = java.io.File(io.legado.engine.shim.AndroidContext.appCtx.cacheDir, path)
+            if (file.exists()) String(file.readBytes(), Charsets.UTF_8) else ""
+        } catch (_: Exception) { "" }
+    }
+
+    fun downloadFile(url: String): String {
+        return try { HttpClient.get(url).body } catch (_: Exception) { "" }
+    }
+
+    fun webViewGetSource(html: String?, url: String?, js: String?, sourceRegex: String): String? {
+        return try {
+            io.legado.engine.webview.BackstageWebView.getSource(html = html, url = url, js = js, headerMap = null, sourceRegex = sourceRegex).body
+        } catch (_: Exception) { null }
     }
 }

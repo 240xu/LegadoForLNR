@@ -110,6 +110,9 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
         saveCheckboxes[rowUi.name] = cb; lr.addView(cb); addView(lr)
         val et = EditText(context).apply {
             hint = rowUi.default ?: ""
+            rowUi.parsedStyle().let { st ->
+                when (st.layout_justifySelf) { "center" -> gravity = Gravity.CENTER; "flex_end" -> gravity = Gravity.END }
+            }
             inputType = if (rowUi.type == RowUi.Type.password) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT
             setText(savedInfo[rowUi.name] ?: rowUi.default ?: "")
             setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundResource(android.R.drawable.edit_text)
@@ -141,6 +144,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
         val tv = TextView(context).apply {
             text = if (left) curChar + dn else dn + curChar; textSize = 14f
             setPadding(dp(16), dp(16), dp(16), dp(16))
+            rowUi.parsedStyle().let { st -> when (st.layout_justifySelf) { "flex_start" -> gravity = Gravity.START; "flex_end" -> gravity = Gravity.END } }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) }
             isClickable = true
             setOnClickListener {
