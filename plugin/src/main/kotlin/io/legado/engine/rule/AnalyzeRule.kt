@@ -245,7 +245,7 @@ class AnalyzeRule(
                     Mode.Json -> getAnalyzeByJSonPath(result).getString(r) ?: getDirectValue(result, r)
                     Mode.XPath -> getAnalyzeByXPath(result).getString(r)
                     Mode.Regex -> { val rr = AnalyzeByRegex.getElement(result.toString(), r.split("&&").toTypedArray()); if (rr is List<*>) rr.firstOrNull()?.toString() ?: "" else rr.toString() }
-                    else -> getAnalyzeByJSoup(result).getString(r)
+                    else -> if (isUrl) getAnalyzeByJSoup(result).getString0(r) else getAnalyzeByJSoup(result).getString(r)
                 }
             }
             if (sr.replaceRegex.isNotEmpty()) { result = replaceRegex(result.toString(), sr) }

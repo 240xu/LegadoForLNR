@@ -1,4 +1,4 @@
-﻿package io.legado.plugin
+package io.legado.plugin
 
 import android.app.Activity
 import android.content.ClipData
@@ -226,10 +226,8 @@ fun LegadoSourceManagerContent(
                             }
                         },
                         onLogout = {
-                            dataSource.logout(source)
-                            source.removeLoginInfo()
-                            source.removeLoginHeader()
-                            statusText = "已清理 ${source.bookSourceName.ifBlank { source.bookSourceUrl }} 的登录状态"
+                            dataSource.deleteSource(source.bookSourceUrl)
+                            statusText = "已删除 ${source.bookSourceName.ifBlank { source.bookSourceUrl }}"
                             refreshSources()
                         },
                         onClearCache = {
@@ -331,7 +329,7 @@ private fun SourceCard(
                     Text("旧入口")
                 }
                 OutlinedButton(onClick = onLogout) {
-                    Text("退出")
+                    Text("删除")
                 }
                 OutlinedButton(onClick = onClearCache) {
                     Text("清缓存")
