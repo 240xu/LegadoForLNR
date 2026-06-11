@@ -784,4 +784,64 @@ open class LoginJsBridge(
             io.legado.engine.webview.BackstageWebView.getSource(html = html, url = url, js = js, headerMap = null, sourceRegex = sourceRegex).body
         } catch (_: Exception) { null }
     }
+
+    // === 对齐 lyc486 JsEncodeUtils 补充方法 ===
+    fun aesBase64DecodeToString(data: String, key: String, transformation: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance(transformation)
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), transformation.split("/")[0])
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec)
+            String(cipher.doFinal(java.util.Base64.getDecoder().decode(data)))
+        } catch (_: Exception) { null }
+    }
+    fun aesDecodeArgsBase64Str(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return aesDecodeToString(data, key, "AES//", iv)
+    }
+    fun aesEncodeArgsBase64Str(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return aesEncodeToString(data, key, "AES//", iv)
+    }
+    fun aesEncodeToBase64String(data: String, key: String, transformation: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance(transformation)
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), transformation.split("/")[0])
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+            java.util.Base64.getEncoder().encodeToString(cipher.doFinal(data.toByteArray()))
+        } catch (_: Exception) { null }
+    }
+    fun desBase64DecodeToString(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance("DES//")
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), "DES")
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec)
+            String(cipher.doFinal(java.util.Base64.getDecoder().decode(data)))
+        } catch (_: Exception) { null }
+    }
+    fun desEncodeToBase64String(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance("DES//")
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), "DES")
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+            java.util.Base64.getEncoder().encodeToString(cipher.doFinal(data.toByteArray()))
+        } catch (_: Exception) { null }
+    }
+    fun tripleDESEncodeArgsBase64Str(data: String, key: String, mode: String, padding: String, iv: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance("DESede//")
+            val keySpec = javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(key), "DESede")
+            val ivSpec = if (iv.isNotBlank()) javax.crypto.spec.IvParameterSpec(java.util.Base64.getDecoder().decode(iv)) else null
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+            java.util.Base64.getEncoder().encodeToString(cipher.doFinal(data.toByteArray()))
+        } catch (_: Exception) { null }
+    }
+    fun hexEncodeToString(utf8: String): String? {
+        return try { utf8.toByteArray().joinToString("") { "%02x".format(it) } } catch (_: Exception) { null }
+    }
+    fun t2s(text: String): String = text // 繁转简需要 ChineseUtils 库，暂返回原文
+    fun s2t(text: String): String = text // 简转繁同上
+    fun toNumChapter(chapter: String): String = chapter // 章节数字化，暂返回原文
+    fun getWebViewUA(): String = io.legado.engine.constant.AppConst.USER_AGENT
 }

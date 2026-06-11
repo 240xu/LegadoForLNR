@@ -70,6 +70,7 @@ class LegadoJavaWebBridge(
     @JavascriptInterface fun md5Encode(str: String): String = delegate.md5Encode(str)
     @JavascriptInterface fun md5Encode16(str: String): String = delegate.md5Encode16(str)
     @JavascriptInterface fun base64DecodeToByteArray(str: String): ByteArray = delegate.base64DecodeToByteArray(str)
+    @JavascriptInterface fun timeFormat(time: Long): String = delegate.timeFormat(time)
     @JavascriptInterface fun timeFormatUTC(time: Long, format: String, offset: Long): String = delegate.timeFormatUTC(time, format, offset)
     @JavascriptInterface fun webView(html: String?, url: String?, js: String?): String? = delegate.webView(html, url, js)
     @JavascriptInterface fun tripleDESEncodeBase64Str(data: String, key: String, mode: String, padding: String, iv: String): String? = delegate.tripleDESEncodeBase64Str(data, key, mode, padding, iv)
@@ -92,6 +93,24 @@ class LegadoJavaWebBridge(
     @JavascriptInterface fun setVariable(value: String?) = delegate.setVariable(value)
     @JavascriptInterface fun putVariable(value: String?): String = delegate.putVariable(value)
     @JavascriptInterface fun put(key: String, value: String): String = delegate.put(key, value)
+
+    @JavascriptInterface fun aesBase64DecodeToString(data: String, key: String, transformation: String, iv: String): String? = delegate.aesBase64DecodeToString(data, key, transformation, iv)
+    @JavascriptInterface fun aesDecodeArgsBase64Str(data: String, key: String, mode: String, padding: String, iv: String): String? = delegate.aesDecodeArgsBase64Str(data, key, mode, padding, iv)
+    @JavascriptInterface fun aesEncodeArgsBase64Str(data: String, key: String, mode: String, padding: String, iv: String): String? = delegate.aesEncodeArgsBase64Str(data, key, mode, padding, iv)
+    @JavascriptInterface fun aesEncodeToBase64String(data: String, key: String, transformation: String, iv: String): String? = delegate.aesEncodeToBase64String(data, key, transformation, iv)
+    @JavascriptInterface fun desBase64DecodeToString(data: String, key: String, mode: String, padding: String, iv: String): String? = delegate.desBase64DecodeToString(data, key, mode, padding, iv)
+    @JavascriptInterface fun desDecodeToString(data: String, key: String, mode: String, padding: String, iv: String): String? = delegate.desDecodeToString(data, key, mode, padding, iv)
+    @JavascriptInterface fun desEncodeToBase64String(data: String, key: String, mode: String, padding: String, iv: String): String? = delegate.desEncodeToBase64String(data, key, mode, padding, iv)
+    @JavascriptInterface fun desEncodeToString(data: String, key: String, mode: String, padding: String, iv: String): String? = delegate.desEncodeToString(data, key, mode, padding, iv)
+    @JavascriptInterface fun tripleDESDecodeStr(data: String, key: String, mode: String, padding: String, iv: String): String? = delegate.tripleDESDecodeStr(data, key, mode, padding, iv)
+    @JavascriptInterface fun tripleDESEncodeArgsBase64Str(data: String, key: String, mode: String, padding: String, iv: String): String? = delegate.tripleDESEncodeArgsBase64Str(data, key, mode, padding, iv)
+    @JavascriptInterface fun hexDecodeToString(hex: String): String? = delegate.hexDecodeToString(hex)
+    @JavascriptInterface fun hexEncodeToString(utf8: String): String? = delegate.hexEncodeToString(utf8)
+    @JavascriptInterface fun htmlFormat(str: String): String = delegate.htmlFormat(str)
+    @JavascriptInterface fun t2s(text: String): String = delegate.t2s(text)
+    @JavascriptInterface fun s2t(text: String): String = delegate.s2t(text)
+    @JavascriptInterface fun toNumChapter(chapter: String): String = delegate.toNumChapter(chapter)
+    @JavascriptInterface fun getWebViewUA(): String = delegate.getWebViewUA()
 }
 
 class LegadoWebBridge(
