@@ -231,11 +231,13 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
 
     private fun evalUiJs(jsStr: String): String? {
         val src = source ?: return null
-        val bridge = loginJsBridge ?: LoginJsBridge(null, src.bookSourceUrl, bookSource = src)
         return try {
             val loginJs = src.getLoginJs() ?: ""
-            val (cx, scope) = buildLoginScope(bridge)
-            try { cx.evaluateString(scope, "$loginJs\n$jsStr", "evalUiJs", 1, null)?.toString() } finally { RhinoContext.exit() }
+            src.evalJS("$loginJs\n$jsStr") { b ->
+                b["result"] = collectFormData()
+                b["book"] = null
+                b["chapter"] = null
+            }?.toString()
         } catch (e: Exception) { android.util.Log.e("LoginActivity", "evalUiJs error", e); null }
     }
 
@@ -280,12 +282,14 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                 val snapshot = collectFormData()
                 Thread {
                     try {
-                        val bridge = loginJsBridge ?: LoginJsBridge(this, src.bookSourceUrl, this, src)
                         val loginJs = src.getLoginJs() ?: ""
-                        val (cx, scope) = buildLoginScope(bridge, snapshot)
-                        ScriptableObject.putProperty(scope, "isLongClick", isLongClick)
-                        try { cx.evaluateString(scope, "$loginJs\n$action", "btn_${rowUi.name}", 1, null) } finally { RhinoContext.exit() }
-                    } catch (e: Exception) { runOnUiThread { Toast.makeText(this, "\u6309\u94ae ${rowUi.name} \u6267\u884c\u5931\u8d25: ${e.message}", Toast.LENGTH_LONG).show() } }
+                        src.evalJS("$loginJs\n$action") { b ->
+                            b["result"] = snapshot
+                            b["book"] = null
+                            b["chapter"] = null
+                            b["isLongClick"] = isLongClick
+                        }
+                    } catch (e: Exception) { runOnUiThread { Toast.makeText(this, "按钮 ${rowUi.name} \u6267\u884c\u5931\u8d25: ${e.message}", Toast.LENGTH_LONG).show() } }
                 }.start()
             }
         }
@@ -294,14 +298,14 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
     private fun executeInputAction(fieldName: String, action: String, inputValue: String) {
         try {
             val src = source ?: return
-            val bridge = loginJsBridge ?: LoginJsBridge(this, src.bookSourceUrl, bookSource = src)
+            val formData = collectFormData().toMutableMap()
+            formData[fieldName] = inputValue
             val loginJs = src.getLoginJs() ?: ""
-            val (cx, scope) = buildLoginScope(bridge)
-            val resultObj = cx.newObject(scope)
-            collectFormData().forEach { (k, v) -> ScriptableObject.putProperty(resultObj, k, v) }
-            ScriptableObject.putProperty(resultObj, fieldName, inputValue)
-            ScriptableObject.putProperty(scope, "result", resultObj)
-            try { cx.evaluateString(scope, "$loginJs\n$action", "input_$fieldName", 1, null) } finally { RhinoContext.exit() }
+            src.evalJS("$loginJs\n$action") { b ->
+                b["result"] = formData
+                b["book"] = null
+                b["chapter"] = null
+            }
         } catch (e: Exception) { android.util.Log.e("LoginActivity", "input action failed: $fieldName", e) }
     }
 
@@ -400,24 +404,15 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                 return@Thread
             }
             try {
-                val bridge = loginJsBridge ?: LoginJsBridge(this, src.bookSourceUrl, this, src)
-                bridge.loginData = loginData.toMutableMap()
-                val (cx, scope) = buildLoginScope(bridge, loginData)
-                ScriptableObject.putProperty(scope, "isLongClick", false)
-                try {
-                    cx.evaluateString(
-                        scope,
-                        "$loginJs\nif(typeof login==='function'){login.apply(this);}else{throw('Function login not implements!!!');}",
-                        "login_default",
-                        1,
-                        null
-                    )
-                    runOnUiThread {
-                        Toast.makeText(this, "\u767b\u5f55\u4fe1\u606f\u5df2\u4fdd\u5b58\u5e76\u6267\u884c login()", Toast.LENGTH_SHORT).show()
-                        finish()
-                    }
-                } finally {
-                    RhinoContext.exit()
+                src.evalJS("$loginJs\nif(typeof login==='function'){login.apply(this);}else{throw('Function login not implements!!!');}") { b ->
+                    b["result"] = loginData
+                    b["book"] = null
+                    b["chapter"] = null
+                    b["isLongClick"] = false
+                }
+                runOnUiThread {
+                    Toast.makeText(this, "登录信息已保存并执行 login()", Toast.LENGTH_SHORT).show()
+                    finish()
                 }
             } catch (e: Exception) {
                 runOnUiThread {

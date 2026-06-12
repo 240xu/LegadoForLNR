@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 鐧诲綍 JS 妗ユ帴
+ * 登录 JS 桥接
  * 鍦?loginUrl / loginUi 鐨?JS 涓€氳繃 java.xxx() 璋冪敤
  *
  * 瀵瑰簲 Legado 鐨?SourceLoginJsExtensions
@@ -50,7 +50,7 @@ open class LoginJsBridge(
 ) {
     private val activityRef: WeakReference<Activity> = WeakReference(activity)
 
-    /** 鐧诲綍鏁版嵁 (琛ㄥ崟鎻愪氦鏃?result 鍙橀噺) */
+    /** 登录数据 (表单提交时 result 变量) */
     var loginData: MutableMap<String, String> = mutableMapOf()
 
     val bookSourceUrl: String get() = bookSource?.bookSourceUrl ?: sourceUrl
@@ -77,7 +77,7 @@ open class LoginJsBridge(
     /** source.getTag() */
     fun getTag(): String = sourceUrl
 
-    /** source.login() - 璋冪敤鐧诲綍鍑芥暟 */
+    /** source.login() - 调用登录函数 */
     fun login() {
         // 鍦?LoginActivity 涓€氳繃 Rhino 鎵ц login()
     }
@@ -349,7 +349,7 @@ open class LoginJsBridge(
         latch.await(30, java.util.concurrent.TimeUnit.SECONDS)
         return result.get()
     }
-    // ==================== 鐧诲綍 UI 鍥炶皟 ====================
+    // ==================== 登录 UI 回调 ====================
 
     fun upLoginData(data: Any?) {
         val map = data.toAnyMap()
@@ -684,11 +684,11 @@ open class LoginJsBridge(
                 maxLines = 1
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             toolbar.addView(Button(activity).apply {
-                text = "瀹屾垚"
+                text = "完成"
                 setOnClickListener { finishWithWebContent(200) }
             })
             toolbar.addView(Button(activity).apply {
-                text = "鍏抽棴"
+                text = "关闭"
                 setOnClickListener {
                     runCatching { dialog.dismiss() }
                     complete(result.get())
