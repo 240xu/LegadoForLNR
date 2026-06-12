@@ -137,7 +137,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
 
     private fun LinearLayout.addToggle(rowUi: RowUi, savedInfo: Map<String, String>) {
         val chars = rowUi.chars?.filterNotNull() ?: listOf("chars is null")
-        val left = true // \u9ed8\u8ba4\u5de6\u4fa7\u663e\u793a\u5b57\u7b26
+        val left = rowUi.parsedStyle().layout_justifySelf != "right"
         val cur = savedInfo[rowUi.name]?.ifEmpty { rowUi.default ?: chars[0] } ?: (rowUi.default ?: chars[0])
         val dn = resolveViewNameStatic(rowUi)
         var curChar = cur
@@ -234,6 +234,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
         return try {
             val loginJs = src.getLoginJs() ?: ""
             src.evalJS("$loginJs\n$jsStr") { b ->
+                b["java"] = loginJsBridge!!
                 b["result"] = collectFormData()
                 b["book"] = null
                 b["chapter"] = null
@@ -264,7 +265,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
             if (vn.length in 3..19 && vn.first() == '\'' && vn.last() == '\'') continue
             when (r.type) {
                 RowUi.Type.button -> { val btn = viewNameButtons[r.name] ?: continue; Thread { val res = evalUiJs(vn); runOnUiThread { btn.text = if (res.isNullOrEmpty()) "null" else res; r.viewName = res } }.start() }
-                RowUi.Type.toggle -> { val tv = toggleViews[r.name] ?: continue; val chars = r.chars?.filterNotNull() ?: listOf("x"); Thread { val res = evalUiJs(vn); runOnUiThread { if (!res.isNullOrEmpty()) { r.viewName = res; tv.text = chars[0] + res } } }.start() }
+                RowUi.Type.toggle -> { val tv = toggleViews[r.name] ?: continue; val chars = r.chars?.filterNotNull() ?: listOf("x"); val left = r.parsedStyle().layout_justifySelf != "right"; Thread { val res = evalUiJs(vn); runOnUiThread { if (!res.isNullOrEmpty()) { r.viewName = res; tv.text = if (left) chars[0] + res else res + chars[0] } } }.start() }
                 RowUi.Type.text, RowUi.Type.password -> { val et = formViews[r.name] as? EditText ?: continue; Thread { val res = evalUiJs(vn); runOnUiThread { et.hint = if (res.isNullOrEmpty()) "null" else res } }.start() }
                 RowUi.Type.select -> {}
             }
@@ -284,6 +285,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                     try {
                         val loginJs = src.getLoginJs() ?: ""
                         src.evalJS("$loginJs\n$action") { b ->
+                            b["java"] = loginJsBridge!!
                             b["result"] = snapshot
                             b["book"] = null
                             b["chapter"] = null
@@ -302,6 +304,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
             formData[fieldName] = inputValue
             val loginJs = src.getLoginJs() ?: ""
             src.evalJS("$loginJs\n$action") { b ->
+                            b["java"] = loginJsBridge!!
                 b["result"] = formData
                 b["book"] = null
                 b["chapter"] = null
@@ -314,18 +317,77 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
     override fun upLoginData(data: Map<String, Any?>?) {
         runOnUiThread {
             if (data == null) {
-                rowUis?.forEach { r -> val v = formViews[r.name]; when (v) { is EditText -> v.setText(r.default ?: ""); is TextView -> { if (r.type == RowUi.Type.toggle) { val chars = r.chars?.filterNotNull() ?: listOf("x"); val c = r.default ?: chars[0]; v.text = c + resolveViewNameStatic(r) } }; is Spinner -> { val chars = r.chars?.filterNotNull() ?: listOf<String>(); val i = chars.indexOf(r.default); if (i >= 0) v.setSelection(i) } } }
-                updateViewNameButtons(); return@runOnUiThread
+                val newLoginInfo: MutableMap<String, String> = mutableMapOf()
+                rowUis?.forEach { r ->
+                    val v = formViews[r.name]
+                    when (v) {
+                        is EditText -> {
+                            val value = r.default ?: ""
+                            newLoginInfo[r.name] = value
+                            v.setText(value)
+                        }
+                        is TextView -> {
+                            when (r.type) {
+                                RowUi.Type.button -> v.text = r.viewName ?: r.name
+                                RowUi.Type.toggle -> {
+                                    val chars = r.chars?.filterNotNull() ?: listOf("x")
+                                    val c = r.default ?: chars[0]
+                                    newLoginInfo[r.name] = c
+                                    val name = resolveViewNameStatic(r)
+                                    val left = r.parsedStyle().layout_justifySelf != "right"
+                                    v.text = if (left) c + name else name + c
+                                }
+                                else -> {}
+                            }
+                        }
+                        is Spinner -> {
+                            val chars = r.chars?.filterNotNull() ?: listOf<String>()
+                            val i = chars.indexOf(r.default)
+                            newLoginInfo[r.name] = r.default ?: chars.getOrElse(0) { "" }
+                            if (i >= 0) v.setSelection(i)
+                        }
+                    }
+                }
+                loginJsBridge?.loginData = newLoginInfo
+                updateViewNameButtons()
+                return@runOnUiThread
             }
+            val loginInfo = loginJsBridge?.loginData ?: mutableMapOf()
             data.forEach { (key, value) ->
-                val sv = value?.toString() ?: return@forEach
+                val sv = value?.toString()
                 val r = rowUis?.firstOrNull { it.name == key }
-                if (r == null) { loginJsBridge?.loginData?.put(key, sv); return@forEach }
+                if (r == null) {
+                    loginInfo[key] = sv ?: ""
+                    return@forEach
+                }
+                val valueOrDefault = sv ?: r.default
                 val v = formViews[key]
                 when (v) {
-                    is EditText -> v.setText(sv)
-                    is TextView -> when (r.type) { RowUi.Type.button -> v.text = sv.ifEmpty { r.viewName ?: key }; RowUi.Type.toggle -> { val chars = r.chars?.filterNotNull() ?: listOf("x"); v.text = sv.ifEmpty { chars[0] } + resolveViewNameStatic(r) } }
-                    is Spinner -> { val a = v.adapter as? ArrayAdapter<String>; if (a != null) for (i in 0 until a.count) { if (a.getItem(i) == sv) { v.setSelection(i); break } } }
+                    is EditText -> {
+                        val displayValue = valueOrDefault ?: ""
+                        loginInfo[r.name] = displayValue
+                        v.setText(displayValue)
+                    }
+                    is TextView -> {
+                        when (r.type) {
+                            RowUi.Type.button -> v.text = valueOrDefault ?: r.viewName ?: key
+                            RowUi.Type.toggle -> {
+                                val chars = r.chars?.filterNotNull() ?: listOf("x")
+                                val c = valueOrDefault ?: chars.getOrElse(0) { "" }
+                                loginInfo[r.name] = c
+                                val name = resolveViewNameStatic(r)
+                                val left = r.parsedStyle().layout_justifySelf != "right"
+                                v.text = if (left) c + name else name + c
+                            }
+                            else -> {}
+                        }
+                    }
+                    is Spinner -> {
+                        val items = r.chars?.filterNotNull() ?: listOf<String>()
+                        val idx = items.indexOf(valueOrDefault)
+                        loginInfo[r.name] = valueOrDefault ?: items.getOrElse(0) { "" }
+                        if (idx >= 0) v.setSelection(idx)
+                    }
                 }
             }
             updateViewNameButtons()
@@ -405,6 +467,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
             }
             try {
                 src.evalJS("$loginJs\nif(typeof login==='function'){login.apply(this);}else{throw('Function login not implements!!!');}") { b ->
+                            b["java"] = loginJsBridge!!
                     b["result"] = loginData
                     b["book"] = null
                     b["chapter"] = null
