@@ -264,7 +264,7 @@ class AnalyzeRule(
         val ruleList = splitSourceRule(ruleStr, true)
         if (ruleList.isEmpty()) return null
         for (sr in ruleList) {
-            putRule(sr.putMap); result ?: continue
+            putRule(sr.putMap); sr.makeUpRule(result); result ?: continue
             val r = sr.rule
             result = when (sr.mode) {
                 Mode.Js -> evalJS(r, result)
@@ -283,7 +283,7 @@ class AnalyzeRule(
         val ruleList = splitSourceRule(ruleStr, true)
         var result: Any? = content ?: return emptyList()
         for (sr in ruleList) {
-            putRule(sr.putMap); result ?: continue
+            putRule(sr.putMap); sr.makeUpRule(result); result ?: continue
             val r = sr.rule
             result = when (sr.mode) {
                 Mode.Js -> evalJS(r, result)
@@ -302,7 +302,7 @@ class AnalyzeRule(
         val ruleList = splitSourceRule(ruleStr)
         var result: Any? = content ?: return null
         for (sr in ruleList) {
-            putRule(sr.putMap); result ?: continue
+            putRule(sr.putMap); sr.makeUpRule(result); result ?: continue
             val r = sr.rule
             result = when (sr.mode) {
                 Mode.Js -> evalJS(r, result)
