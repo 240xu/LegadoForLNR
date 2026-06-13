@@ -33,7 +33,7 @@ interface BaseSource : JsExtensions {
         return when {
             loginJs == null -> null
             loginJs.startsWith("@js:") -> loginJs.substring(4)
-            loginJs.startsWith("<js>") -> loginJs.substring(4, loginJs.lastIndexOf("<"))
+            loginJs.startsWith("<js>") -> io.legado.engine.constant.AppPattern.unwrapJsTag(loginJs, "js")
             else -> loginJs
         }
     }
@@ -61,7 +61,7 @@ interface BaseSource : JsExtensions {
                 try {
                     val json = when {
                         it.startsWith("@js:", true) -> evalJS(it.substring(4)).toString()
-                        it.startsWith("<js>", true) -> evalJS(it.substring(4, it.lastIndexOf("<"))).toString()
+                        it.startsWith("<js>", true) -> evalJS(io.legado.engine.constant.AppPattern.unwrapJsTag(it, "js")).toString()
                         else -> it
                     }
                     GSONStrict.fromJsonObject<Map<String, String>>(json)?.let { m -> putAll(m) }
@@ -117,8 +117,7 @@ interface BaseSource : JsExtensions {
             val evaluated = when {
                 raw.startsWith("@js:", true) -> evalJS("${getLoginJs() ?: ""}\n${raw.substring(4)}")
                 raw.startsWith("<js>", true) -> {
-                    val end = raw.lastIndexOf("<").takeIf { it > 4 } ?: raw.length
-                    evalJS("${getLoginJs() ?: ""}\n${raw.substring(4, end)}")
+                    evalJS("${getLoginJs() ?: ""}\n${io.legado.engine.constant.AppPattern.unwrapJsTag(raw, "js")}")
                 }
                 else -> return raw
             }

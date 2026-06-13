@@ -4,9 +4,6 @@ import org.mozilla.javascript.Context
 import org.mozilla.javascript.NativeObject
 import org.mozilla.javascript.ScriptableObject
 
-/**
- * 与 Legado 一致：extends NativeObject，可直接作为 Rhino scope 使用
- */
 class ScriptBindings : NativeObject() {
 
     companion object {
@@ -25,7 +22,7 @@ class ScriptBindings : NativeObject() {
     }
 
     operator fun set(key: String, value: Any?) {
-        val cx = Context.enter()
+        Context.enter()
         try {
             put(key, this, Context.javaToJS(value, this))
         } finally {
@@ -33,18 +30,17 @@ class ScriptBindings : NativeObject() {
         }
     }
 
-    operator fun get(key: String): Any? {
-        return super.get(key, this)
+    operator fun set(index: Int, value: Any?) {
+        Context.enter()
+        try {
+            put(index, this, Context.javaToJS(value, this))
+        } finally {
+            Context.exit()
+        }
     }
 
-    fun entries(): Set<Map.Entry<String, Any?>> {
-        return keys.map { key ->
-            val k = key.toString()
-            object : Map.Entry<String, Any?> {
-                override val key = k
-                override val value = get(k, this@ScriptBindings)
-            }
-        }.toSet()
+    fun put(key: String, value: Any?) {
+        set(key, value)
     }
 }
 

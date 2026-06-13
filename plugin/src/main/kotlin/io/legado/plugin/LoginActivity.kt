@@ -371,7 +371,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
 
         val actualUrl = when {
             loginUrl.startsWith("@js:", true) -> evalLoginJs(loginUrl.substring(4))?.toString() ?: loginUrl
-            loginUrl.startsWith("<js>", true) -> evalLoginJs(loginUrl.substring(4, loginUrl.lastIndexOf("<")))?.toString() ?: loginUrl
+            loginUrl.startsWith("<js>", true) -> evalLoginJs(io.legado.engine.constant.AppPattern.unwrapJsTag(loginUrl, "js"))?.toString() ?: loginUrl
             else -> loginUrl
         }
 
@@ -549,8 +549,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
         val evaluated = when {
             loginUiStr.startsWith("@js:", true) -> evalLoginJs(loginUiStr.substring(4))
             loginUiStr.startsWith("<js>", true) -> {
-                val end = loginUiStr.lastIndexOf("<").takeIf { it > 4 } ?: loginUiStr.length
-                evalLoginJs(loginUiStr.substring(4, end))
+                evalLoginJs(io.legado.engine.constant.AppPattern.unwrapJsTag(loginUiStr, "js"))
             }
             else -> return loginUiStr
         }

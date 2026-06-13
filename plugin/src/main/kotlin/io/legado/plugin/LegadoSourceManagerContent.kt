@@ -673,8 +673,7 @@ private fun resolveLoginUiJson(source: BookSource): String {
         val evaluated = when {
             raw.startsWith("@js:", true) -> source.evalJS("${source.getLoginJs() ?: ""}\n${raw.substring(4)}")
             raw.startsWith("<js>", true) -> {
-                val end = raw.lastIndexOf("<").takeIf { it > 4 } ?: raw.length
-                source.evalJS("${source.getLoginJs() ?: ""}\n${raw.substring(4, end)}")
+                source.evalJS("${source.getLoginJs() ?: ""}\n${io.legado.engine.constant.AppPattern.unwrapJsTag(raw, "js")}")
             }
             else -> return raw
         }
@@ -705,8 +704,7 @@ private fun resolveLoginUrl(source: BookSource): String {
         when {
             raw.startsWith("@js:", true) -> source.evalJS(raw.substring(4))?.toString() ?: raw
             raw.startsWith("<js>", true) -> {
-                val end = raw.lastIndexOf("<").takeIf { it > 4 } ?: raw.length
-                source.evalJS(raw.substring(4, end))?.toString() ?: raw
+                source.evalJS(io.legado.engine.constant.AppPattern.unwrapJsTag(raw, "js"))?.toString() ?: raw
             }
             else -> raw
         }

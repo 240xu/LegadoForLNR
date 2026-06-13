@@ -1047,8 +1047,9 @@ class LegadoJsonWebDataSource(
         return when {
             rule.startsWith("@js:", true) -> evalExploreJs(source, rule.substring(4))
             rule.startsWith("<js>", true) -> {
-                val end = rule.lastIndexOf("<").takeIf { it > 4 } ?: rule.length
-                evalExploreJs(source, rule.substring(4, end))
+                val match = Regex("<js>([\\s\\S]*?)</js>", RegexOption.IGNORE_CASE).find(rule)
+                val js = match?.groupValues?.getOrNull(1) ?: rule.substring(4)
+                evalExploreJs(source, js)
             }
             else -> raw
         }

@@ -15,17 +15,8 @@ object RhinoScriptEngine {
         return try {
             cx.optimizationLevel = -1
             cx.setClassShutter(RhinoClassShutter)
-            val scope = cx.initStandardObjects()
-            bindings.prototype?.let { scope.prototype = it }
-            bindings.entries().forEach { (key, value) ->
-                when (value) {
-                    is String -> ScriptableObject.putProperty(scope, key, value)
-                    is Number -> ScriptableObject.putProperty(scope, key, value)
-                    is Boolean -> ScriptableObject.putProperty(scope, key, value)
-                    else -> ScriptableObject.putProperty(scope, key, Context.javaToJS(value, scope))
-                }
-            }
-            scope
+            bindings.prototype = cx.initStandardObjects()
+            bindings
         } finally { Context.exit() }
     }
     fun eval(jsStr: String, scope: Scriptable): Any? {

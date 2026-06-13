@@ -316,9 +316,9 @@ class AnalyzeUrl(
         private fun unwrapJs(jsStr: String): String {
             return when {
                 jsStr.startsWith("@js:", true) -> jsStr.substring(4)
-                jsStr.startsWith("<js>", true) && jsStr.lastIndexOf("<") > 0 -> jsStr.substring(4, jsStr.lastIndexOf("<"))
+                jsStr.startsWith("<js>", true) -> io.legado.engine.constant.AppPattern.unwrapJsTag(jsStr, "js")
                 jsStr.startsWith("@webJs:", true) -> jsStr.substring(7)
-                jsStr.startsWith("<webJs>", true) && jsStr.lastIndexOf("<") > 0 -> jsStr.substring(7, jsStr.lastIndexOf("<"))
+                jsStr.startsWith("<webJs>", true) -> io.legado.engine.constant.AppPattern.unwrapJsTag(jsStr, "webJs")
                 else -> jsStr
             }
         }
