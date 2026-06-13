@@ -37,6 +37,8 @@ class JsoupResponse(private val response: org.jsoup.Connection.Response) {
 
     fun bodyString(): String = response.body()
     fun header(name: String): String = response.header(name) ?: ""
+    fun cookie(name: String): String? = response.cookie(name)
+    fun cookies(): Map<String, String> = response.cookies()
     fun isSuccessful(): Boolean = response.statusCode() in 200..299
     fun code(): Int = response.statusCode()
     fun message(): String = response.statusMessage()
