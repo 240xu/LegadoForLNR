@@ -194,9 +194,9 @@ class AnalyzeRule(
         return getString(ruleStr as String?, null, false)
     }
 
-        fun getString(ruleStr: String?, unescape: Boolean): String {
+    fun getString(ruleStr: String?, unescape: Boolean): String {
         if (ruleStr.isNullOrEmpty()) return ""
-        return getString(splitSourceRuleCacheString(ruleStr), null, false)
+        return getString(splitSourceRuleCacheString(ruleStr), null, false, unescape)
     }
 
     fun getString(ruleList: List<SourceRule>, mContent: Any? = null, isUrl: Boolean = false, unescape: Boolean = true): String {

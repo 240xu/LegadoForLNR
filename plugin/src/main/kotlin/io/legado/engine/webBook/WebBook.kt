@@ -93,9 +93,9 @@ object WebBook {
             val chapters = BookChapterList.analyzeChapterList(bookSource, book, res.url, res.body, rule)
             allChapters.addAll(chapters)
             currentUrl = if (!rule.nextTocUrl.isNullOrBlank()) {
-                val ar = AnalyzeRule(source = bookSource).setContent(res.body, res.url)
+                val ar = AnalyzeRule(source = bookSource).setContent(res.body, currentUrl)
                 val next = ar.getString(rule.nextTocUrl!!)
-                if (next.isNotBlank() && next != currentUrl) AnalyzeUrl.getAbsoluteURL(res.url, next) else null
+                if (next.isNotBlank() && next != currentUrl) AnalyzeUrl.getAbsoluteURL(currentUrl!!, next) else null
             } else null
             pageCount++
         }
@@ -297,7 +297,7 @@ object BookChapterList {
                         isVolume = rule.isVolume?.let { runCatching { toBooleanLenient(itemAr.getString(it)) }.getOrNull() } ?: false,
                         isVip = rule.isVip?.let { runCatching { toBooleanLenient(itemAr.getString(it)) }.getOrNull() } ?: false,
                         isPay = rule.isPay?.let { runCatching { toBooleanLenient(itemAr.getString(it)) }.getOrNull() } ?: false,
-                        wordCount = rule.updateTime?.let { runCatching { itemAr.getString(it).trim() }.getOrNull()?.takeIf { s -> s.isNotBlank() } }
+                        updateTime = rule.updateTime?.let { runCatching { itemAr.getString(it).toLongOrNull() ?: 0L }.getOrNull() } ?: 0L
                     ))
                 } catch (_: Exception) {}
             }
