@@ -126,33 +126,54 @@ class AnalyzeRule(
         val c = mContent ?: this.content ?: return null
         if (ruleList.isEmpty()) return null
         result = c
-        if (ruleList.size == 1) {
-            val single = ruleList.first()
-            getDirectValue(result, single.rule)?.let { return listOf(replaceRegex(it, single)) }
-        }
-        for (sr in ruleList) {
-            putRule(sr.putMap); sr.makeUpRule(this, result); result ?: continue
-            val r = sr.rule
-            if (r.isNotEmpty()) {
-                result = when (sr.mode) {
-                    Mode.Js, Mode.WebJs -> evalJS(r, result)
-                    Mode.Json -> getAnalyzeByJSonPath(result).getStringList(r)
-                        .ifEmpty { getDirectValue(result, r)?.let { listOf(it) } ?: emptyList() }
-                    Mode.XPath -> getAnalyzeByXPath(result).getStringList(r)
-                    Mode.Regex -> { val rr = AnalyzeByRegex.getElement(result.toString(), r.split("&&").toTypedArray()); if (rr is List<*>) rr.map { it.toString() } else listOf(rr.toString()) }
-                    else -> getAnalyzeByJSoup(result).getStringList(r)
+        if (result is NativeObject) {
+            val sourceRule = ruleList.first()
+            putRule(sourceRule.putMap)
+            sourceRule.makeUpRule(this, result)
+            result = if (sourceRule.getParamSize() > 1) sourceRule.rule else (result as NativeObject)[sourceRule.rule]
+            result?.let {
+                if (sourceRule.replaceRegex.isNotEmpty() && it is List<*>) {
+                    result = it.map { o -> replaceRegex(o.toString(), sourceRule) }
+                } else if (sourceRule.replaceRegex.isNotEmpty()) {
+                    result = replaceRegex(result.toString(), sourceRule)
                 }
             }
-            if (sr.replaceRegex.isNotEmpty()) { result = when (result) { is List<*> -> result.map { replaceRegex(it.toString(), sr) }; else -> replaceRegex(result.toString(), sr) } }
+        } else if (result is LinkedTreeMap<*, *>) {
+            result = (result as LinkedTreeMap<String, *>)[ruleList.first().rule]
+        } else {
+            for (sr in ruleList) {
+                putRule(sr.putMap); sr.makeUpRule(this, result); result ?: continue
+                val r = sr.rule
+                if (r.isNotEmpty()) {
+                    result = when (sr.mode) {
+                        Mode.Js, Mode.WebJs -> evalJS(r, result)
+                        Mode.Json -> getAnalyzeByJSonPath(result).getStringList(r)
+                        Mode.XPath -> getAnalyzeByXPath(result).getStringList(r)
+                        Mode.Regex -> { val rr = AnalyzeByRegex.getElement(result.toString(), r.split("&&").toTypedArray()); if (rr is List<*>) rr.map { it.toString() } else listOf(rr.toString()) }
+                        Mode.Default -> getAnalyzeByJSoup(result).getStringList(r)
+                        else -> r
+                    }
+                }
+                if (sr.replaceRegex.isNotEmpty() && result is List<*>) {
+                    result = (result as List<*>).map { replaceRegex(it.toString(), sr) }
+                } else if (sr.replaceRegex.isNotEmpty()) {
+                    result = replaceRegex(result.toString(), sr)
+                }
+            }
         }
         if (result == null) return null
         if (result is String) result = result.split("\n")
-        @Suppress("UNCHECKED_CAST") val list = result as? List<String> ?: return null
-        return if (isUrl) {
-            list.map { if (it.isNotBlank()) AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), it) else it }
-        } else {
-            list.map { StringEscapeUtils.unescapeHtml4(it) }
+        if (isUrl) {
+            val urlList = ArrayList<String>()
+            if (result is List<*>) {
+                for (url in result) {
+                    val absoluteURL = AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), url.toString())
+                    if (absoluteURL.isNotEmpty() && !urlList.contains(absoluteURL)) urlList.add(absoluteURL)
+                }
+            }
+            return urlList
         }
+        @Suppress("UNCHECKED_CAST") return (result as? List<String>)?.map { StringEscapeUtils.unescapeHtml4(it) }
     }
 
     fun getString(ruleStr: String?, mContent: Any? = null, isUrl: Boolean = false): String {
@@ -193,44 +214,51 @@ class AnalyzeRule(
             } else {
                 (result as NativeObject)[sourceRule.rule]?.toString()
             }?.let { replaceRegex(it, sourceRule) }
-            if (result == null) return ""
-            val str = result.toString()
-            return if (isUrl && str.isNotBlank()) AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), str) else StringEscapeUtils.unescapeHtml4(str)
-        }
-        // LinkedTreeMap 快速路径：Gson解析的JSON对象直接键值访问
-        if (result is LinkedTreeMap<*, *>) {
-            val r = ruleList.first().rule
-            result = (result as LinkedTreeMap<String, *>)[r]?.toString()
-            if (result == null) return ""
-            return if (isUrl) AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), result.toString()) else StringEscapeUtils.unescapeHtml4(result.toString())
-        }
-        if (ruleList.size == 1) {
-            val single = ruleList.first()
-            val direct = getDirectValue(result, single.rule)
-            if (direct != null) {
-                return replaceRegex(direct, single)
-            }
-        }
-        for (sr in ruleList) {
-            putRule(sr.putMap); sr.makeUpRule(this, result); result ?: continue
-            val r = sr.rule
-            if (r.isNotEmpty()) {
-                result = when (sr.mode) {
-                    Mode.WebJs -> evalJS(r, result)?.toString() ?: ""
-                    Mode.Js -> evalJS(r, result)
-                    Mode.Json -> getAnalyzeByJSonPath(result).getString(r) ?: getDirectValue(result, r)
-                    Mode.XPath -> getAnalyzeByXPath(result).getString(r)
-                    Mode.Regex -> { val rr = AnalyzeByRegex.getElement(result.toString(), r.split("&&").toTypedArray()); if (rr is List<*>) { lastRegexGroups = rr.map { it.toString() }; rr.firstOrNull()?.toString() ?: "" } else rr.toString() }
-                    Mode.Default -> if (isUrl) getAnalyzeByJSoup(result).getString0(r) else getAnalyzeByJSoup(result).getString(r)
-                    else -> getAnalyzeByJSoup(result).getString(r)
+        } else if (result is LinkedTreeMap<*, *>) {
+            // LinkedTreeMap 快速路径：Gson解析的JSON对象直接键值访问
+            result = (result as LinkedTreeMap<String, *>)[ruleList.first().rule]?.toString()
+        } else {
+            if (ruleList.size == 1) {
+                val single = ruleList.first()
+                val direct = getDirectValue(result, single.rule)
+                if (direct != null) {
+                    result = replaceRegex(direct, single)
                 }
             }
-            if (sr.replaceRegex.isNotEmpty()) { result = replaceRegex(result.toString(), sr) }
+            if (result == null || ruleList.size > 1 || getDirectValue(result, ruleList.first().rule) == null) {
+                for (sr in ruleList) {
+                    putRule(sr.putMap); sr.makeUpRule(this, result); result ?: continue
+                    val r = sr.rule
+                    if (r.isNotBlank() || sr.replaceRegex.isEmpty()) {
+                        result = when (sr.mode) {
+                            Mode.WebJs -> evalJS(r, result)?.toString() ?: ""
+                            Mode.Js -> evalJS(r, result)
+                            Mode.Json -> getAnalyzeByJSonPath(result).getString(r)
+                            Mode.XPath -> getAnalyzeByXPath(result).getString(r)
+                            Mode.Regex -> { val rr = AnalyzeByRegex.getElement(result.toString(), r.split("&&").toTypedArray()); if (rr is List<*>) { lastRegexGroups = rr.map { it.toString() }; rr.firstOrNull()?.toString() ?: "" } else rr.toString() }
+                            Mode.Default -> if (isUrl) getAnalyzeByJSoup(result).getString0(r) else getAnalyzeByJSoup(result).getString(r)
+                            else -> r
+                        }
+                    }
+                    if (result != null && sr.replaceRegex.isNotEmpty()) { result = replaceRegex(result.toString(), sr) }
+                }
+            }
         }
-        if (result == null) return ""
-        val str = result.toString()
-        if (isUrl && str.isNotBlank()) { return AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), str) }
-        return StringEscapeUtils.unescapeHtml4(str)
+        if (result == null) result = ""
+        val resultStr = result.toString()
+        val str = if (unescape && resultStr.indexOf('&') > -1) {
+            StringEscapeUtils.unescapeHtml4(resultStr)
+        } else {
+            resultStr
+        }
+        if (isUrl) {
+            return if (str.isBlank()) {
+                baseUrl ?: ""
+            } else {
+                AnalyzeUrl.getAbsoluteURL((redirectUrl?.toString() ?: baseUrl).orEmpty(), str)
+            }
+        }
+        return str
     }
 
 
