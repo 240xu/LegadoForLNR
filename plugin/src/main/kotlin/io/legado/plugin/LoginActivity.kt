@@ -267,10 +267,13 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
 
     /**
      * 执行文本输入的 action（用户完成输入后执行JS）
+     * 使用 source.evalJS 确保 jsLib 函数可用
      */
     private fun executeInputAction(fieldName: String, action: String, inputValue: String) {
         try {
             val src = source ?: return
+            val bridge = loginJsBridge ?: LoginJsBridge(null, src.bookSourceUrl, bookSource = src)
+            bridge.loginData = collectFormData().toMutableMap()
             val loginJs = src.getLoginJs() ?: ""
             val fieldJson = gson.toJson(fieldName)
             val valueJson = gson.toJson(inputValue)
@@ -281,48 +284,28 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                 result[$fieldJson] = $valueJson;
                 $action
             """.trimIndent()
-            val cx = RhinoContext.enter()
-            try {
-                cx.optimizationLevel = -1
-                val scope = cx.initStandardObjects()
-                val bridge = loginJsBridge ?: LoginJsBridge(null, src.bookSourceUrl)
-                bridge.loginData = collectFormData().toMutableMap()
-                ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
-                ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
-                ScriptableObject.putProperty(scope, "baseSource", RhinoContext.javaToJS(bridge, scope))
-                ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
-                ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
-                val resultObj = cx.newObject(scope)
-                collectFormData().forEach { (k, v) -> ScriptableObject.putProperty(resultObj, k, v) }
-                ScriptableObject.putProperty(scope, "result", resultObj)
-                cx.evaluateString(scope, fullJs, "input_action_${fieldName}", 1, null)
-            } finally { RhinoContext.exit() }
+            src.evalJS(fullJs) { b ->
+                b["java"] = bridge; b["source"] = bridge; b["baseSource"] = bridge
+                b["result"] = collectFormData()
+            }
         } catch (e: Exception) {
             android.util.Log.e("LoginActivity", "输入 action 执行失败: $fieldName", e)
         }
     }
 
     /**
-     * 执行按钮 action
-     * 支持：
-     * - URL: 打开浏览器
-     * - "getVerificationCode()": 获取验证码
-     * - JS函数名: 调用 loginUrl 中的函数
+     * 执行按钮 action（使用 source.evalJS 加载 jsLib）
      */
     private fun executeButtonAction(rowUi: RowUi, isLongClick: Boolean) {
         val action = rowUi.action
         val src = source ?: return
-
         if (action.isNullOrBlank()) return
 
         when {
             action.startsWith("http://") || action.startsWith("https://") -> {
-                try {
-                    startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(action)))
-                } catch (_: Exception) {}
+                try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(action))) } catch (_: Exception) {}
             }
-            action == "getVerificationCode()" -> {
-                // 验证码按钮
+            else -> {
                 val formData = collectFormData().toMutableMap()
                 Thread {
                     try {
@@ -334,59 +317,12 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                             var result = {};
                             result.get = function(key) { return java.fetchLoginData()[key] || ""; };
                             var isLongClick = $isLongClick;
-                            getVerificationCode();
+                            $action
                         """.trimIndent()
-                        val cx = RhinoContext.enter()
-                        try {
-                            cx.optimizationLevel = -1
-                            val scope = cx.initStandardObjects()
-                            ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
-                            ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
-                            ScriptableObject.putProperty(scope, "baseSource", RhinoContext.javaToJS(bridge, scope))
-                            ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
-                            ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
-                            val resultObj = cx.newObject(scope)
-                            formData.forEach { (k, v) -> ScriptableObject.putProperty(resultObj, k, v) }
-                            ScriptableObject.putProperty(scope, "result", resultObj)
-                            ScriptableObject.putProperty(scope, "isLongClick", isLongClick)
-                            cx.evaluateString(scope, fullJs, "verification_code", 1, null)
-                        } finally { RhinoContext.exit() }
-                    } catch (e: Exception) {
-                        runOnUiThread { Toast.makeText(this, "获取验证码失败: ${e.message}", Toast.LENGTH_LONG).show() }
-                    }
-                }.start()
-            }
-            else -> {
-                // JS函数调用（如 login()）
-                val formData = collectFormData().toMutableMap()
-                Thread {
-                    try {
-                        val loginJs = src.getLoginJs() ?: ""
-                        val buttonJs = action
-                        val fullJs = """
-                            $loginJs
-                            var result = {};
-                            result.get = function(key) { return java.fetchLoginData()[key] || ""; };
-                            var isLongClick = $isLongClick;
-                            $buttonJs
-                        """.trimIndent()
-                        val cx = RhinoContext.enter()
-                        try {
-                            cx.optimizationLevel = -1
-                            val scope = cx.initStandardObjects()
-                            val bridge = loginJsBridge ?: LoginJsBridge(null, src.bookSourceUrl, bookSource = src)
-                            bridge.loginData = formData.toMutableMap()
-                            ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
-                            ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
-                            ScriptableObject.putProperty(scope, "baseSource", RhinoContext.javaToJS(bridge, scope))
-                            ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
-                            ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
-                            val resultObj = cx.newObject(scope)
-                            formData.forEach { (k, v) -> ScriptableObject.putProperty(resultObj, k, v) }
-                            ScriptableObject.putProperty(scope, "result", resultObj)
-                            ScriptableObject.putProperty(scope, "isLongClick", isLongClick)
-                            cx.evaluateString(scope, fullJs, "button_js_${rowUi.name}", 1, null)
-                        } finally { RhinoContext.exit() }
+                        src.evalJS(fullJs) { b ->
+                            b["java"] = bridge; b["source"] = bridge; b["baseSource"] = bridge
+                            b["result"] = formData
+                        }
                     } catch (e: Exception) {
                         runOnUiThread { Toast.makeText(this, "按钮 ${rowUi.name} 执行失败: ${e.message}", Toast.LENGTH_LONG).show() }
                     }
