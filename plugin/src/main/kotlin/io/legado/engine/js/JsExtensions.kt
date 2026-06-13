@@ -68,7 +68,7 @@ interface JsExtensions {
             response.body
         } catch (e: Exception) {
             Debug.log("ajax(`$urlStr) error: `${e.message}")
-            null
+            e.stackTraceToString()
         }
     }
 
@@ -476,7 +476,7 @@ interface JsExtensions {
             val intStr = matcher.group(2)?.toIntOrNull()?.toString() ?: matcher.group(2)
             return "${matcher.group(1)}${intStr}${matcher.group(3)}"
         }
-        return s.filter { it.isDigit() }.takeIf { it.isNotEmpty() }
+        return s
     }
 
     class JsURL(urlStr: String, baseUrl: String? = null) {

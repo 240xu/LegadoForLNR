@@ -214,7 +214,7 @@ interface BaseSource : JsExtensions {
             bytes.copyOfRange(0, minOf(16, bytes.size))
         }
 
-        private fun encryptAes(plain: String): String {
+        fun encryptAes(plain: String): String {
             val keySpec = javax.crypto.spec.SecretKeySpec(aesKey, "AES")
             val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
             cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec)
@@ -222,7 +222,7 @@ interface BaseSource : JsExtensions {
             return java.util.Base64.getEncoder().encodeToString(encrypted)
         }
 
-        private fun decryptAes(encoded: String): String {
+        fun decryptAes(encoded: String): String {
             val keySpec = javax.crypto.spec.SecretKeySpec(aesKey, "AES")
             val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
             cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec)

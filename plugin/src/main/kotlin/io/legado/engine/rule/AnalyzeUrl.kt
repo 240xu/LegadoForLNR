@@ -56,8 +56,8 @@ class AnalyzeUrl(
     private var dnsIp: String? = null
     private var webViewDelayTime: Long = 0
     private var dataBody: String? = null
-    // Legado 官方：null 时默认启用，仅 false 时禁用
-    private val enabledCookieJar = source?.enabledCookieJar != false
+    // Legado 官方：仅 enabledCookieJar == true 时启用
+    private val enabledCookieJar = source?.enabledCookieJar == true
     private val domain: String
 
     init {
@@ -111,8 +111,8 @@ class AnalyzeUrl(
             if (url.isNotEmpty()) ruleUrl = url
         }
         key?.let { k ->
-            val encodedKey = try { URLEncoder.encode(k, "UTF-8") } catch (_: Exception) { k }
-            ruleUrl = ruleUrl.replace("{{key}}", encodedKey)
+            // Legado 不对 {{key}} 做 URL 编码，直接替换原始值
+            ruleUrl = ruleUrl.replace("{{key}}", k)
         }
         page?.let { p ->
             // Legado 标准格式: <1,2,3> 逗号列表按页码索引取值
@@ -305,9 +305,13 @@ class AnalyzeUrl(
         return value
     }
     fun get(key: String): String {
+        // Legado 特殊处理：bookName 和 title 直接返回
+        when (key) {
+            "bookName" -> (ruleData as? Book)?.let { return it.name }
+            "title" -> chapter?.let { return it.title }
+        }
         return chapter?.getVariable(key)?.takeIf { it.isNotEmpty() }
             ?: ruleData?.getVariable(key)?.takeIf { it.isNotEmpty() }
-            ?: source?.get(key)?.takeIf { it.isNotEmpty() }
             ?: ""
     }
     fun get(): String {

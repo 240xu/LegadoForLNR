@@ -77,18 +77,18 @@ class LoginJsBridge(
         // 在 LoginActivity 中通过 Rhino 执行 login()
     }
 
-    /** source.getLoginInfo() */
+    /** source.getLoginInfo() — 使用AES解密，与BaseSource一致 */
     fun getLoginInfo(): String? {
         return try {
             CacheManager.get("userInfo_$sourceUrl")?.let { cache ->
-                return try { String(android.util.Base64.decode(cache, android.util.Base64.DEFAULT)) } catch (_: Exception) { cache }
+                return try { io.legado.engine.data.BaseSource.decryptAes(cache) } catch (_: Exception) { cache }
             }
             val prefs = activityRef.get()?.getSharedPreferences("legado_login_info", android.content.Context.MODE_PRIVATE)
             prefs?.getString("info_$sourceUrl", null)
         } catch (_: Exception) { null }
     }
 
-    /** source.getLoginInfoMap() */
+    /** source.getLoginInfoMap() — 解析loginUi默认值 */
     fun getLoginInfoMap(): MutableMap<String, String> {
         val json = getLoginInfo()
         if (json != null) {
@@ -96,14 +96,25 @@ class LoginJsBridge(
                 com.google.gson.Gson().fromJson(json, object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type) ?: mutableMapOf()
             } catch (_: Exception) { mutableMapOf() }
         }
-        if (loginData.isNotEmpty()) return loginData.toMutableMap()
-        return mutableMapOf()
+        // 从loginUi解析默认字段
+        if (loginUi.isNullOrBlank()) return mutableMapOf()
+        val resolved = if (loginUi!!.startsWith("@js:", true) || loginUi!!.startsWith("<js>", true)) {
+            val src = bookSource ?: return mutableMapOf()
+            try { src.evalJS(io.legado.engine.constant.AppPattern.stripJsPrefix(loginUi!!))?.toString() } catch (_: Exception) { loginUi }
+        } else loginUi
+        val defaults = com.google.gson.Gson().fromJson<List<io.legado.engine.model.RowUi>>(resolved, object : com.google.gson.reflect.TypeToken<List<io.legado.engine.model.RowUi>>() {}.type)
+            ?.filter { it.type != io.legado.engine.model.RowUi.Type.button }
+            ?.associate { it.name to (it.default ?: "") }
+            ?.filterKeys { it.isNotBlank() }
+            ?: emptyMap()
+        if (defaults.isNotEmpty()) putLoginInfo(com.google.gson.Gson().toJson(defaults))
+        return defaults.toMutableMap()
     }
 
-    /** source.putLoginInfo() */
+    /** source.putLoginInfo() — 使用AES加密，与BaseSource一致 */
     fun putLoginInfo(info: String): Boolean {
         return try {
-            val encoded = android.util.Base64.encodeToString(info.toByteArray(), android.util.Base64.DEFAULT)
+            val encoded = io.legado.engine.data.BaseSource.encryptAes(info)
             CacheManager.put("userInfo_$sourceUrl", encoded)
             val prefs = activityRef.get()?.getSharedPreferences("legado_login_info", android.content.Context.MODE_PRIVATE)
             prefs?.edit()?.putString("info_$sourceUrl", info)?.apply()
