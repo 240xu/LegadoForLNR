@@ -56,8 +56,8 @@ class AnalyzeUrl(
     private var dnsIp: String? = null
     private var webViewDelayTime: Long = 0
     private var dataBody: String? = null
-    // lyc 源默认不设此字段时当作 true，确保 cookie 能正常收发
-    private val enabledCookieJar = source?.enabledCookieJar == true
+    // Legado 官方：null 时默认启用，仅 false 时禁用
+    private val enabledCookieJar = source?.enabledCookieJar != false
     private val domain: String
 
     init {
