@@ -643,34 +643,24 @@ private fun executeLoginJs(
             )
             bridge.loginData = formData.toMutableMap()
             val loginJs = source.getLoginJs().orEmpty()
-            val cx = RhinoContext.enter()
-            try {
-                cx.optimizationLevel = -1
-                val scope = cx.initStandardObjects()
-                ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
-                ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
-                ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
-                ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
-                val resultObj = cx.newObject(scope)
-                formData.forEach { (key, value) -> ScriptableObject.putProperty(resultObj, key, value) }
-                ScriptableObject.putProperty(scope, "result", resultObj)
-                cx.evaluateString(scope, "result.get=function(key){return result[key] || '';};", "result_get", 1, null)
-                if (loginJs.isNotBlank()) {
-                    cx.evaluateString(scope, loginJs, "login_js", 1, null)
-                }
+            val fullJs = buildString {
+                append("result.get=function(key){return result[key] || '';};\n")
+                if (loginJs.isNotBlank()) append(loginJs).append('\n')
                 when {
-                    !actionScript.isNullOrBlank() -> cx.evaluateString(scope, actionScript, "login_action", 1, null)
-                    runDefaultLogin -> cx.evaluateString(scope, "if(typeof login==='function'){login();}", "login_default", 1, null)
+                    !actionScript.isNullOrBlank() -> append(actionScript)
+                    runDefaultLogin -> append("if(typeof login==='function'){login();}")
                 }
+            }
+            source.evalJS(fullJs) { b ->
+                b["java"] = bridge; b["source"] = bridge; b["baseSource"] = bridge
+                b["result"] = formData
+            }
                 // 登录脚本执行后，将 bridge 中的 cookie/header 回灌到 source
                 val finalLoginHeader = bridge.getLoginHeader()
                 if (!finalLoginHeader.isNullOrBlank()) {
                     source.putLoginHeader(finalLoginHeader)
                 }
                 mainThread { onStatus("登录脚本执行完成") }
-            } finally {
-                RhinoContext.exit()
-            }
         } catch (e: Exception) {
             mainThread { onStatus("登录脚本执行失败: ${e.message ?: e.javaClass.simpleName}") }
         }

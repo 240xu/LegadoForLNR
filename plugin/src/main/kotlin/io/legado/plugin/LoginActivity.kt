@@ -338,19 +338,12 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
     private fun evaluateViewName(viewName: String): String {
         return try {
             val src = source ?: return viewName
-            val cx = RhinoContext.enter()
-            try {
-                cx.optimizationLevel = -1
-                val scope = cx.initStandardObjects()
-                val bridge = loginJsBridge ?: LoginJsBridge(null, src.bookSourceUrl)
-                bridge.loginData = collectFormData().toMutableMap()
-                ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
-                ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
-                ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
-                ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
-                val result = cx.evaluateString(scope, viewName, "viewName", 1, null)
-                result?.toString() ?: viewName
-            } finally { RhinoContext.exit() }
+            val bridge = loginJsBridge ?: LoginJsBridge(null, src.bookSourceUrl, bookSource = src)
+            bridge.loginData = collectFormData().toMutableMap()
+            val result = src.evalJS(viewName) { b ->
+                b["java"] = bridge; b["source"] = bridge; b["baseSource"] = bridge
+            }
+            result?.toString()?.takeIf { it.isNotBlank() } ?: viewName
         } catch (_: Exception) { viewName }
     }
 
