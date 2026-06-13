@@ -300,7 +300,11 @@ class AnalyzeRule(
             b["nextChapterUrl"] = nextChapterUrl ?: ""
         }
         val sharedScope = source?.let { SharedJsScope.getScope(it.jsLib) }
-        val scope = if (sharedScope != null) { bindings.apply { prototype = sharedScope }; RhinoScriptEngine.getRuntimeScope(bindings) } else { RhinoScriptEngine.getRuntimeScope(bindings) }
+        val scope = if (sharedScope == null) {
+            RhinoScriptEngine.getRuntimeScope(bindings)
+        } else {
+            bindings.apply { prototype = sharedScope }
+        }
         return try { RhinoScriptEngine.eval(js, scope) } catch (e: Exception) { Debug.log("evalJS error: ${e.message}"); null }
     }
 

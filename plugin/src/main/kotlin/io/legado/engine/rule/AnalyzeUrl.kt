@@ -262,11 +262,15 @@ class AnalyzeUrl(
             b["key"] = key ?: ""
             b["page"] = page ?: 1
             b["url"] = url
+            b["infoMap"] = infoMap
         }
         return try {
             val sharedScope = source?.let { SharedJsScope.getScope(it.jsLib) }
-            if (sharedScope != null) bindings.prototype = sharedScope
-            val scope = RhinoScriptEngine.getRuntimeScope(bindings)
+            val scope = if (sharedScope == null) {
+                RhinoScriptEngine.getRuntimeScope(bindings)
+            } else {
+                bindings.apply { prototype = sharedScope }
+            }
             RhinoScriptEngine.eval(js, scope)
         } catch (e: Exception) {
             Debug.log("AnalyzeUrl evalJS error: " + e.message)
