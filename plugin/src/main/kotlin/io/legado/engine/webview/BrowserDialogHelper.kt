@@ -89,6 +89,11 @@ object BrowserDialogHelper {
                 webView.settings.javaScriptEnabled = true
                 webView.settings.domStorageEnabled = true
                 webView.settings.userAgentString = AppConst.USER_AGENT
+                webView.settings.setSupportZoom(true)
+                webView.settings.builtInZoomControls = true
+                webView.settings.displayZoomControls = false
+                webView.settings.loadWithOverviewMode = true
+                webView.settings.useWideViewPort = true
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
@@ -167,6 +172,11 @@ object BrowserDialogHelper {
                 webView.settings.javaScriptEnabled = true
                 webView.settings.domStorageEnabled = true
                 webView.settings.userAgentString = AppConst.USER_AGENT
+                webView.settings.setSupportZoom(true)
+                webView.settings.builtInZoomControls = true
+                webView.settings.displayZoomControls = false
+                webView.settings.loadWithOverviewMode = true
+                webView.settings.useWideViewPort = true
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 

@@ -289,6 +289,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                 bridge.loginData = collectFormData().toMutableMap()
                 ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
                 ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
+                ScriptableObject.putProperty(scope, "baseSource", RhinoContext.javaToJS(bridge, scope))
                 ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
                 ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
                 val resultObj = cx.newObject(scope)
@@ -341,6 +342,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                             val scope = cx.initStandardObjects()
                             ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
                             ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
+                            ScriptableObject.putProperty(scope, "baseSource", RhinoContext.javaToJS(bridge, scope))
                             ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
                             ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
                             val resultObj = cx.newObject(scope)
@@ -376,6 +378,7 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                             bridge.loginData = formData.toMutableMap()
                             ScriptableObject.putProperty(scope, "java", RhinoContext.javaToJS(bridge, scope))
                             ScriptableObject.putProperty(scope, "source", RhinoContext.javaToJS(bridge, scope))
+                            ScriptableObject.putProperty(scope, "baseSource", RhinoContext.javaToJS(bridge, scope))
                             ScriptableObject.putProperty(scope, "cookie", RhinoContext.javaToJS(CookieStore, scope))
                             ScriptableObject.putProperty(scope, "cache", RhinoContext.javaToJS(CacheManager, scope))
                             val resultObj = cx.newObject(scope)
@@ -449,15 +452,22 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.userAgentString = io.legado.engine.constant.AppConst.USER_AGENT
+            // 支持双指缩放
+            settings.setSupportZoom(true)
+            settings.builtInZoomControls = true
+            settings.displayZoomControls = false
+            settings.loadWithOverviewMode = true
+            settings.useWideViewPort = true
             addJavascriptInterface(loginJsBridge!!, "java")
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    // 注入 jsLib 和 source
+                    // 注入 baseSource/source/java
                     try {
                         val injectJs = """
                             if (typeof java === 'undefined') { window.java = {}; }
-                            if (typeof source === 'undefined') { window.source = {}; }
+                            if (typeof source === 'undefined') { window.source = java; }
+                            if (typeof baseSource === 'undefined') { window.baseSource = java; }
                         """.trimIndent()
                         view?.evaluateJavascript(injectJs, null)
                     } catch (_: Exception) {}

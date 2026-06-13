@@ -192,6 +192,7 @@ interface BaseSource : JsExtensions {
         val bindings = buildScriptBindings { b ->
             b["java"] = this
             b["source"] = this
+            b["baseSource"] = this
             b["baseUrl"] = getKey()
             b["cookie"] = CookieStore
             b["cache"] = CacheManager

@@ -294,7 +294,7 @@ class AnalyzeRule(
         val js = unwrapJs(jsStr)
         val bindings = buildScriptBindings { b ->
             b["java"] = this; b["cookie"] = CookieStore; b["cache"] = CacheManager
-            b["source"] = source; b["book"] = book; b["result"] = result
+            b["source"] = source; b["baseSource"] = source; b["book"] = book; b["result"] = result
             b["baseUrl"] = baseUrl ?: ""; b["chapter"] = chapter
             b["title"] = chapter?.title ?: ""; b["src"] = content ?: ""
             b["nextChapterUrl"] = nextChapterUrl ?: ""
