@@ -16,7 +16,7 @@ data class SearchBook(
     var originOrder: Int = 0,
     var tag: String? = null,
     override var tocUrl: String? = null,
-    override var type: Int = BookType.default,
+    override var type: Int = BookType.text,
     override var order: Int = 0,
     override var imageStyle: String? = null,
     override var durChapterIndex: Int = 0,

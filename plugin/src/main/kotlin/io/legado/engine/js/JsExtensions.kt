@@ -472,7 +472,11 @@ interface JsExtensions {
     fun toNumChapter(s: String?): String? {
         if (s.isNullOrBlank()) return null
         val matcher = io.legado.engine.constant.AppPattern.titleNumPattern.matcher(s)
-        return if (matcher.find()) matcher.group(2) else s.filter { it.isDigit() }.takeIf { it.isNotEmpty() }
+        if (matcher.find()) {
+            val intStr = matcher.group(2)?.toIntOrNull()?.toString() ?: matcher.group(2)
+            return "${matcher.group(1)}${intStr}${matcher.group(3)}"
+        }
+        return s.filter { it.isDigit() }.takeIf { it.isNotEmpty() }
     }
 
     class JsURL(urlStr: String, baseUrl: String? = null) {
