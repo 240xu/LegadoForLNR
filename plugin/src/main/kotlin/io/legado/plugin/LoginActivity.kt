@@ -277,16 +277,16 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
             val loginJs = src.getLoginJs() ?: ""
             val fieldJson = gson.toJson(fieldName)
             val valueJson = gson.toJson(inputValue)
+            // 不用 var result = {}，让 bindings 注入的 result (JavaMap) 生效
             val fullJs = """
                 $loginJs
-                var result = {};
                 result.get = function(key) { return java.fetchLoginData()[key] || ""; };
                 result[$fieldJson] = $valueJson;
                 $action
             """.trimIndent()
             src.evalJS(fullJs) { b ->
                 b["java"] = bridge; b["source"] = bridge; b["baseSource"] = bridge
-                b["result"] = collectFormData()
+                b["result"] = collectFormData().toMutableMap()
             }
         } catch (e: Exception) {
             android.util.Log.e("LoginActivity", "输入 action 执行失败: $fieldName", e)
@@ -314,14 +314,13 @@ class LoginActivity : Activity(), LoginJsBridge.Callback {
                         val loginJs = src.getLoginJs() ?: ""
                         val fullJs = """
                             $loginJs
-                            var result = {};
                             result.get = function(key) { return java.fetchLoginData()[key] || ""; };
                             var isLongClick = $isLongClick;
                             $action
                         """.trimIndent()
                         src.evalJS(fullJs) { b ->
                             b["java"] = bridge; b["source"] = bridge; b["baseSource"] = bridge
-                            b["result"] = formData
+                            b["result"] = formData.toMutableMap()
                         }
                     } catch (e: Exception) {
                         runOnUiThread { Toast.makeText(this, "按钮 ${rowUi.name} 执行失败: ${e.message}", Toast.LENGTH_LONG).show() }

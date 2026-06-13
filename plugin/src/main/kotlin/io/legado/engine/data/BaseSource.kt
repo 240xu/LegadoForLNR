@@ -199,11 +199,11 @@ interface BaseSource : JsExtensions {
             bindingsConfig(b)
         }
         val sharedScope = SharedJsScope.getScope(jsLib)
-        val scope = if (sharedScope != null) {
-            bindings.apply { prototype = sharedScope }
+        val scope = if (sharedScope == null) {
             RhinoScriptEngine.getRuntimeScope(bindings)
         } else {
-            RhinoScriptEngine.getRuntimeScope(bindings)
+            bindings.apply { prototype = sharedScope }
+            // 与 Legado 一致：sharedScope 存在时直接返回 bindings，不调用 getRuntimeScope
         }
         return RhinoScriptEngine.eval(jsStr, scope)
     }

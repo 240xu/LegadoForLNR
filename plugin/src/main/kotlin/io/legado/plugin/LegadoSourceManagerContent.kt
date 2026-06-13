@@ -653,7 +653,7 @@ private fun executeLoginJs(
             }
             source.evalJS(fullJs) { b ->
                 b["java"] = bridge; b["source"] = bridge; b["baseSource"] = bridge
-                b["result"] = formData
+                b["result"] = formData.toMutableMap()
             }
                 // 登录脚本执行后，将 bridge 中的 cookie/header 回灌到 source
                 val finalLoginHeader = bridge.getLoginHeader()
