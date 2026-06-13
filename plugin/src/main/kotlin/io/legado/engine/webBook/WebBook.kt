@@ -20,28 +20,32 @@ object WebBook {
 
     fun executeWithLoginCheck(bookSource: BookSource, analyzeUrl: AnalyzeUrl): HttpResponse {
         applyRateLimit(bookSource)
-        var response = analyzeUrl.execute()
         val loginCheckJs = bookSource.loginCheckJs
+        var response = analyzeUrl.execute()
         if (!loginCheckJs.isNullOrBlank()) {
             try {
-                val ar = AnalyzeRule(source = bookSource).setContent(response.body, response.url)
-                val checkResult = ar.evalJS(loginCheckJs)
+                // Legado 模式：将 response 作为 result 绑定传给 evalJS
+                val checkResult = bookSource.evalJS(loginCheckJs) { b ->
+                    b["result"] = io.legado.engine.http.StrResponse(response)
+                    b["book"] = null
+                    b["chapter"] = null
+                }
                 if (checkResult == false || checkResult?.toString() == "false") {
                     Debug.log("loginCheckJs failed for ${bookSource.bookSourceName}")
-                    // 只执行 loginJs 中的纯 JS 登录逻辑（自动 token 刷新等），不弹 UI
-                    // 弹 UI 由 SourceLoginCallback 在用户手动触发时处理
                     val loginJs = bookSource.getLoginJs()
                     if (!loginJs.isNullOrBlank()) {
-                        try {
-                            bookSource.evalJS(loginJs)
-                        } catch (e: Exception) {
+                        try { bookSource.evalJS(loginJs) } catch (e: Exception) {
                             Debug.log("loginJs exec error: ${e.message}")
                         }
                     }
-                    // 标记需要登录，但不阻塞（用户需手动在插件管理页登录）
                     SourceLoginCallback.requestLogin(bookSource)
                     applyRateLimit(bookSource)
                     response = analyzeUrl.execute()
+                } else if (checkResult is io.legado.engine.http.StrResponse) {
+                    // checkJs 返回了修改后的 StrResponse
+                    response = io.legado.engine.http.HttpResponse(
+                        checkResult.url, checkResult.body(), checkResult.code, checkResult.headers
+                    )
                 }
             } catch (e: Exception) {
                 Debug.log("loginCheckJs error: ${e.message}")

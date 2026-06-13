@@ -355,6 +355,8 @@ class AnalyzeRule(
         }
     }
 
+    enum class Mode { XPath, Json, Default, Js, Regex, WebJs }
+
     inner class SourceRule(ruleStr: String, initialMode: Mode = Mode.Default) {
         var rule: String = ""
         var mode: Mode = initialMode
@@ -362,63 +364,177 @@ class AnalyzeRule(
         var replacement: String = ""
         var replaceFirst: Boolean = false
         val putMap = HashMap<String, String>()
+        private val ruleParam = ArrayList<String>()
+        private val ruleType = ArrayList<Int>()
+        private val getRuleType = -2
+        private val jsRuleType = -1
+        private val defaultRuleType = 0
 
         init {
-            var r = ruleStr
-            when {
-                mode == Mode.Js || mode == Mode.Regex || mode == Mode.WebJs -> { }
-                r.startsWith("@XPath:", true) -> { mode = Mode.XPath; r = r.substring(7) }
-                r.startsWith("@Json:", true) -> { mode = Mode.Json; r = r.substring(6) }
-                r.startsWith("@CSS:", true) -> { mode = Mode.Default }
-                r.startsWith("@@") -> { mode = Mode.Default; r = r.substring(2) }
-                isJSON || r.startsWith("$.") || r.startsWith("$[") -> mode = Mode.Json
-                r.startsWith("//") -> mode = Mode.XPath
+            var r = when {
+                mode == Mode.Js || mode == Mode.Regex || mode == Mode.WebJs -> ruleStr
+                ruleStr.startsWith("@CSS:", true) -> { mode = Mode.Default; ruleStr }
+                ruleStr.startsWith("@@") -> { mode = Mode.Default; ruleStr.substring(2) }
+                ruleStr.startsWith("@XPath:", true) -> { mode = Mode.XPath; ruleStr.substring(7) }
+                ruleStr.startsWith("@Json:", true) -> { mode = Mode.Json; ruleStr.substring(6) }
+                isJSON || ruleStr.startsWith("$.") || ruleStr.startsWith("$[") -> { mode = Mode.Json; ruleStr }
+                ruleStr.startsWith("//") -> { mode = Mode.XPath; ruleStr }
+                else -> ruleStr
             }
             r = splitPutRule(r, putMap)
-            val parts = r.split("##")
-            rule = parts[0].trim()
-            if (parts.size > 1) replaceRegex = parts[1]
-            if (parts.size > 2) replacement = parts[2]
-            if (parts.size > 3) replaceFirst = true
-        }
-
-        fun makeUpRule(analyzer: AnalyzeRule, currentResult: Any?) {
-            rule = replaceGetAndJs(rule, analyzer, currentResult)
-        }
-
-        fun getParamSize(): Int = 1
-
-        private fun replaceGetAndJs(ruleStr: String, analyzer: AnalyzeRule, currentResult: Any?): String {
-            val sb = StringBuilder()
-            var i = 0
-            while (i < ruleStr.length) {
-                when {
-                    ruleStr.startsWith("@get:{", i) -> { val end = ruleStr.indexOf("}", i + 6); if (end > 0) { sb.append(analyzer.get(ruleStr.substring(i + 6, end))); i = end + 1 } else { sb.append(ruleStr[i]); i++ } }
-                    // $1/$2 等正则捕获组引用
-                    ruleStr[i] == '$' && i + 1 < ruleStr.length && ruleStr[i + 1].isDigit() -> {
-                        val groupIdx = ruleStr[i + 1] - '0'
-                        val groups = analyzer.lastRegexGroups
-                        if (groupIdx < groups.size) sb.append(groups[groupIdx]) else sb.append("$${groupIdx}")
-                        i += 2
+            // 拆分 @get:{} 和 {{}}
+            var start = 0
+            val evalMatcher = evalPattern.matcher(r)
+            if (evalMatcher.find()) {
+                val tmp = r.substring(start, evalMatcher.start())
+                if (mode != Mode.Js && mode != Mode.Regex && mode != Mode.WebJs &&
+                    (evalMatcher.start() == 0 || !tmp.contains("##"))
+                ) {
+                    mode = Mode.Regex
+                }
+                do {
+                    if (evalMatcher.start() > start) {
+                        splitRegex(r.substring(start, evalMatcher.start()))
                     }
-                    ruleStr.startsWith("{{", i) -> { val end = ruleStr.indexOf("}}", i + 2); if (end > 0) { val inner = ruleStr.substring(i + 2, end); val jsResult = if (inner.startsWith("$.") || inner.startsWith("$[")) analyzer.getString(inner, currentResult) else analyzer.evalJS(inner, currentResult); when (jsResult) { is Double -> if (jsResult % 1.0 == 0.0) sb.append("%.0f".format(jsResult)) else sb.append(jsResult); else -> sb.append(jsResult?.toString() ?: "") }; i = end + 2 } else { sb.append(ruleStr[i]); i++ } }
-                    else -> { sb.append(ruleStr[i]); i++ }
+                    val matched = evalMatcher.group()
+                    when {
+                        matched.startsWith("@get:", true) -> {
+                            ruleType.add(getRuleType)
+                            ruleParam.add(matched.substring(6, matched.lastIndex))
+                        }
+                        matched.startsWith("{{") -> {
+                            ruleType.add(jsRuleType)
+                            ruleParam.add(matched.substring(2, matched.length - 2))
+                        }
+                        else -> splitRegex(matched)
+                    }
+                    start = evalMatcher.end()
+                } while (evalMatcher.find())
+            }
+            if (r.length > start) {
+                splitRegex(r.substring(start))
+            }
+            // 如果没有 ruleParam，按 ## 分割替换规则
+            if (ruleParam.isEmpty()) {
+                val parts = r.split("##")
+                rule = parts[0].trim()
+                if (parts.size > 1) replaceRegex = parts[1]
+                if (parts.size > 2) replacement = parts[2]
+                if (parts.size > 3) replaceFirst = true
+            }
+        }
+
+        /** 拆分 $1/$2 正则捕获组引用 */
+        private fun splitRegex(ruleStr: String) {
+            var start = 0
+            val ruleStrArray = ruleStr.split("##")
+            val regexMatcher = regexPattern.matcher(ruleStrArray[0])
+            if (regexMatcher.find()) {
+                if (mode != Mode.Js && mode != Mode.Regex && mode != Mode.WebJs) {
+                    mode = Mode.Regex
+                }
+                do {
+                    if (regexMatcher.start() > start) {
+                        ruleType.add(defaultRuleType)
+                        ruleParam.add(ruleStr.substring(start, regexMatcher.start()))
+                    }
+                    val matched = regexMatcher.group()
+                    ruleType.add(matched.substring(1).toInt())
+                    ruleParam.add(matched)
+                    start = regexMatcher.end()
+                } while (regexMatcher.find())
+            }
+            if (ruleStr.length > start) {
+                ruleType.add(defaultRuleType)
+                ruleParam.add(ruleStr.substring(start))
+            }
+        }
+
+        /** 替换 @get:{} / {{}} / $1/$2 */
+        fun makeUpRule(analyzer: AnalyzeRule, currentResult: Any?) {
+            if (ruleParam.isNotEmpty()) {
+                val infoVal = StringBuilder()
+                var index = ruleParam.size
+                while (index-- > 0) {
+                    val regType = ruleType[index]
+                    when {
+                        regType > defaultRuleType -> {
+                            // $1/$2 正则捕获组引用
+                            @Suppress("UNCHECKED_CAST")
+                            (currentResult as? List<String?>)?.run {
+                                if (this.size > regType) {
+                                    this[regType]?.let { infoVal.insert(0, it) }
+                                }
+                            } ?: infoVal.insert(0, ruleParam[index])
+                        }
+                        regType == jsRuleType -> {
+                            // {{JS表达式}}
+                            val inner = ruleParam[index]
+                            val jsResult = if (inner.startsWith("$.") || inner.startsWith("$[")) {
+                                analyzer.getString(inner, currentResult)
+                            } else {
+                                analyzer.evalJS(inner, currentResult)
+                            }
+                            when (jsResult) {
+                                null -> Unit
+                                is Double -> if (jsResult % 1.0 == 0.0) infoVal.insert(0, "%.0f".format(jsResult)) else infoVal.insert(0, jsResult)
+                                else -> infoVal.insert(0, jsResult.toString())
+                            }
+                        }
+                        regType == getRuleType -> {
+                            // @get:{key}
+                            infoVal.insert(0, analyzer.get(ruleParam[index]))
+                        }
+                        else -> {
+                            // 普通文本
+                            infoVal.insert(0, ruleParam[index])
+                        }
+                    }
+                }
+                rule = infoVal.toString()
+            }
+            // 分离替换规则
+            val ruleStrS = rule.split("##")
+            rule = ruleStrS[0].trim()
+            if (ruleStrS.size > 1) replaceRegex = ruleStrS[1]
+            if (ruleStrS.size > 2) replacement = ruleStrS[2]
+            if (ruleStrS.size > 3) replaceFirst = true
+        }
+
+        private fun splitPutRule(ruleStr: String, putMap: HashMap<String, String>): String {
+            var vRuleStr = ruleStr
+            val putMatcher = putPattern.matcher(vRuleStr)
+            while (putMatcher.find()) {
+                vRuleStr = vRuleStr.replace(putMatcher.group(), "")
+                val putJsonStr = putMatcher.group(1)
+                val putJson = io.legado.engine.shim.GSON.fromJsonObject<Map<String, String>>(putJsonStr)
+                if (putJson != null) {
+                    putMap.putAll(putJson)
+                    continue
+                }
+                val kv = putJsonStr.split("=")
+                if (kv.size >= 2) {
+                    putMap[kv[0].trim()] = kv[1].trim()
                 }
             }
-            return sb.toString()
+            return vRuleStr
         }
 
-        private fun splitPutRule(rule: String, putMap: HashMap<String, String>): String {
-            val regex = Regex("@put:\\{([^}]+?)\\}", RegexOption.IGNORE_CASE)
-            var result = rule
-            regex.findAll(rule).forEach { match -> val content = match.groupValues[1]; val eqIdx = content.indexOf("="); if (eqIdx > 0) putMap[content.substring(0, eqIdx).trim()] = content.substring(eqIdx + 1).trim(); result = result.replace(match.value, "") }
-            return result
-        }
+        fun getParamSize(): Int = ruleParam.size
     }
 
-    enum class Mode { XPath, Json, Default, Js, Regex, WebJs }
-
     companion object {
+        // @get:{} 和 {{}} 匹配模式
+        private val evalPattern = java.util.regex.Pattern.compile(
+            "@get:\\{[^}]+?\\}|\\{\\{[\\w\\W]*?\\}\\}", java.util.regex.Pattern.CASE_INSENSITIVE
+        )
+        // $1/$2 正则捕获组引用
+        private val regexPattern = java.util.regex.Pattern.compile("\\$\\d{1,2}")
+        // @put:{} 匹配模式
+        private val putPattern = java.util.regex.Pattern.compile(
+            "@put:\\{.+?\\}", java.util.regex.Pattern.CASE_INSENSITIVE
+        )
+
         private fun unwrapJs(jsStr: String): String {
             return when {
                 jsStr.startsWith("@js:", true) -> jsStr.substring(4)
