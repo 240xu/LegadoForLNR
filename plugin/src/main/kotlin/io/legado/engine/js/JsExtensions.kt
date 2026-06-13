@@ -461,9 +461,19 @@ interface JsExtensions {
 
     fun isAbsUrl(url: String): Boolean = url.startsWith("http://") || url.startsWith("https://")
     fun isJson(str: String): Boolean = str.trimStart().let { it.startsWith("{") || it.startsWith("[") }
-    fun htmlFormat(str: String): String = str
+    fun htmlFormat(str: String): String {
+        return try {
+            val doc = org.jsoup.Jsoup.parseBodyFragment(str)
+            doc.select("img").forEach { it.replaceWith(org.jsoup.nodes.TextNode("[[${it.attr("src")}]]")) }
+            doc.body().text().replace("[[", "<img src=\"").replace("]]", "\">")
+        } catch (_: Exception) { str }
+    }
     fun stripUrlOption(url: String): String = UrlOptionParser.strip(url)
-    fun toNumChapter(s: String?): String? = s?.filter { it.isDigit() }?.takeIf { it.isNotEmpty() }
+    fun toNumChapter(s: String?): String? {
+        if (s.isNullOrBlank()) return null
+        val matcher = io.legado.engine.constant.AppPattern.titleNumPattern.matcher(s)
+        return if (matcher.find()) matcher.group(2) else s.filter { it.isDigit() }.takeIf { it.isNotEmpty() }
+    }
 
     class JsURL(urlStr: String, baseUrl: String? = null) {
         var url: String = urlStr

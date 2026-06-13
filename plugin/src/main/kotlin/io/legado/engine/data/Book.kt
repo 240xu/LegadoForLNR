@@ -17,7 +17,7 @@ data class Book(
     override var durChapterIndex: Int = 0,
     var durChapterPos: Int = 0,
     var durChapterPage: Int = 0,
-    var group: Int = 0,
+    var group: Long = 0,
     var tag: String? = null,
     var originName: String = "",
     var origin: String = "",

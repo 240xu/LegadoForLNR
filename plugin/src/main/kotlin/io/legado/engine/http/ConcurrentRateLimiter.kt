@@ -1,4 +1,4 @@
-﻿package io.legado.engine.http
+package io.legado.engine.http
 
 import java.util.concurrent.ConcurrentHashMap
 
@@ -18,7 +18,6 @@ object ConcurrentRateLimiter {
         try {
             val parts = rateLimit.split("/")
             if (parts.size == 2) {
-                // 格式: count/timeWindow
                 val maxCount = parts[0].toIntOrNull() ?: return
                 val timeWindow = parts[1].toLongOrNull() ?: return
                 var waitTime = 0L
@@ -36,16 +35,18 @@ object ConcurrentRateLimiter {
                     synchronized(accessList) { accessList.add(System.currentTimeMillis()) }
                 }
             } else {
-                // 格式: intervalMs
                 val interval = rateLimit.toLongOrNull() ?: return
-                val lastAccess = lastAccessMap[key] ?: 0L
-                val now = System.currentTimeMillis()
-                val elapsed = now - lastAccess
-                if (elapsed < interval) {
-                    Thread.sleep(interval - elapsed)
+                lastAccessMap.compute(key) { _, lastAccess ->
+                    val now = System.currentTimeMillis()
+                    val elapsed = now - (lastAccess ?: 0L)
+                    if (elapsed < interval) {
+                        Thread.sleep(interval - elapsed)
+                    }
+                    System.currentTimeMillis()
                 }
-                lastAccessMap[key] = System.currentTimeMillis()
             }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
         } catch (_: Exception) {}
     }
 }

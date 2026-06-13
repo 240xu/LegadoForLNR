@@ -11,8 +11,8 @@ data class BookChapter(
     var baseUrl: String = "",
     var bookHtml: String? = null,
     var tag: String? = null,
-    var start: Long = 0,
-    var end: Long = 0,
+    var start: Long? = null,
+    var end: Long? = null,
     var wordCount: String? = null,
     var updateTime: Long = 0,
     var variableMap: HashMap<String, String>? = null

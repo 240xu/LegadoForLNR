@@ -33,7 +33,7 @@ interface BaseSource : JsExtensions {
         return when {
             loginJs == null -> null
             loginJs.startsWith("@js:") -> loginJs.substring(4)
-            loginJs.startsWith("<js>") -> io.legado.engine.constant.AppPattern.unwrapJsTag(loginJs, "js")
+            loginJs.startsWith("<js>") -> loginJs.substring(4, loginJs.lastIndexOf("<"))
             else -> loginJs
         }
     }
@@ -61,7 +61,7 @@ interface BaseSource : JsExtensions {
                 try {
                     val json = when {
                         it.startsWith("@js:", true) -> evalJS(it.substring(4)).toString()
-                        it.startsWith("<js>", true) -> evalJS(io.legado.engine.constant.AppPattern.unwrapJsTag(it, "js")).toString()
+                        it.startsWith("<js>", true) -> evalJS(it.substring(4, it.lastIndexOf("<"))).toString()
                         else -> it
                     }
                     GSONStrict.fromJsonObject<Map<String, String>>(json)?.let { m -> putAll(m) }
@@ -89,7 +89,7 @@ interface BaseSource : JsExtensions {
     fun getLoginInfo(): String? {
         return try {
             val cache = CacheManager.get("userInfo_" + getKey()) ?: return null
-            try { String(android.util.Base64.decode(cache, android.util.Base64.DEFAULT)) } catch (_: Exception) { cache }
+            try { decryptAes(cache) } catch (_: Exception) { cache }
         } catch (_: Exception) { null }
     }
     fun getLoginInfoMap(): MutableMap<String, String> {
@@ -134,7 +134,7 @@ interface BaseSource : JsExtensions {
     }
     fun putLoginInfo(info: String): Boolean {
         return try {
-            val encoded = android.util.Base64.encodeToString(info.toByteArray(), android.util.Base64.DEFAULT)
+            val encoded = encryptAes(info)
             CacheManager.put("userInfo_" + getKey(), encoded)
             true
         } catch (_: Exception) { false }
@@ -205,5 +205,29 @@ interface BaseSource : JsExtensions {
             // 与 Legado 一致：sharedScope 存在时直接返回 bindings，不调用 getRuntimeScope
         }
         return RhinoScriptEngine.eval(jsStr, scope)
+    }
+
+    companion object {
+        private val aesKey: ByteArray by lazy {
+            val id = io.legado.engine.shim.AndroidContext.getAndroidId()
+            val bytes = id.toByteArray()
+            bytes.copyOfRange(0, minOf(16, bytes.size))
+        }
+
+        private fun encryptAes(plain: String): String {
+            val keySpec = javax.crypto.spec.SecretKeySpec(aesKey, "AES")
+            val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec)
+            val encrypted = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
+            return java.util.Base64.getEncoder().encodeToString(encrypted)
+        }
+
+        private fun decryptAes(encoded: String): String {
+            val keySpec = javax.crypto.spec.SecretKeySpec(aesKey, "AES")
+            val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec)
+            val decoded = java.util.Base64.getDecoder().decode(encoded)
+            return String(cipher.doFinal(decoded), Charsets.UTF_8)
+        }
     }
 }

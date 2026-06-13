@@ -42,7 +42,7 @@ data class BookSource(
     var customButton: Boolean = false
 ) : BaseSource {
 
-    override fun getTag(): String = bookSourceName.ifBlank { bookSourceUrl }
+    override fun getTag(): String = bookSourceName
     override fun getKey(): String = bookSourceUrl
 
     fun getSearchRule() = ruleSearch ?: SearchRule().also { ruleSearch = it }
@@ -84,7 +84,7 @@ data class BookSource(
         return kinds
     }
 
-    fun equals(source: BookSource): Boolean {
+    fun equal(source: BookSource): Boolean {
         return bookSourceUrl == source.bookSourceUrl
                 && bookSourceName == source.bookSourceName
                 && bookSourceGroup == source.bookSourceGroup

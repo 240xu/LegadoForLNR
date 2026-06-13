@@ -4,18 +4,14 @@ import android.content.Context
 import android.content.SharedPreferences
 import io.legado.engine.rule.QueryTTF
 
+import java.util.concurrent.ConcurrentHashMap
+
 object CacheManager {
     private const val PREFS_NAME = "legado_cache"
-    private val memoryCache = object : LinkedHashMap<String, Any>(128, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Any>?): Boolean {
-            return size > 512
-        }
+    private val memoryCache = object : ConcurrentHashMap<String, Any>(128) {
+        // LRU eviction not needed for ConcurrentHashMap - GC handles cleanup
     }
-    private val queryTTFCache = object : LinkedHashMap<String, QueryTTF>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, QueryTTF>?): Boolean {
-            return size > 4
-        }
-    }
+    private val queryTTFCache = ConcurrentHashMap<String, QueryTTF>(8)
 
     private fun prefs(): SharedPreferences {
         return AndroidContext.appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -71,23 +67,18 @@ object CacheManager {
     fun getBoolean(key: String): Boolean = prefs().getBoolean(key, false)
     fun putBoolean(key: String, value: Boolean) = prefs().edit().putBoolean(key, value).apply()
 
-    @Synchronized
     fun putMemory(key: String, value: Any?) {
         if (value == null) memoryCache.remove(key) else memoryCache[key] = value
     }
 
-    @Synchronized
     fun getFromMemory(key: String): Any? = memoryCache[key]
 
-    @Synchronized
     fun deleteMemory(key: String) {
         memoryCache.remove(key)
     }
 
-    @Synchronized
     fun getQueryTTF(key: String): QueryTTF? = queryTTFCache[key]
 
-    @Synchronized
     fun putQueryTTF(key: String, queryTTF: QueryTTF) {
         queryTTFCache[key] = queryTTF
     }

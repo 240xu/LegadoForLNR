@@ -2,6 +2,7 @@
 
 object BookType {
     const val default = 0
+    const val text = 0
     const val audio = 1
     const val image = 2
     const val file = 3

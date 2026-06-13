@@ -19,13 +19,15 @@ import java.security.MessageDigest
  */
 object SharedJsScope {
 
-    private val scopeMap = java.util.concurrent.ConcurrentHashMap<String, java.lang.ref.WeakReference<Scriptable>>()
+    private val scopeMap = object : java.util.LinkedHashMap<String, Scriptable>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Scriptable>?): Boolean = size > 16
+    }
     private val jsFileCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     fun getScope(jsLib: String?): Scriptable? {
         if (jsLib.isNullOrBlank()) return null
         val key = md5(jsLib)
-        var scope = scopeMap[key]?.get()
+        var scope = synchronized(scopeMap) { scopeMap[key] }
         if (scope == null) {
             scope = RhinoScriptEngine.getRuntimeScope(ScriptBindings())
             try {
@@ -53,7 +55,7 @@ object SharedJsScope {
             } catch (e: Exception) {
                 Debug.log("jsLib eval error: ${e.message}")
             }
-            scopeMap[key] = java.lang.ref.WeakReference(scope)
+            synchronized(scopeMap) { scopeMap[key] = scope }
         }
         return scope
     }
@@ -61,7 +63,7 @@ object SharedJsScope {
     fun remove(jsLib: String?) {
         if (jsLib.isNullOrBlank()) return
         val key = md5(jsLib)
-        scopeMap.remove(key)
+        synchronized(scopeMap) { scopeMap.remove(key) }
         // 如果是JSON格式，清除下载缓存
         if (jsLib.trimStart().startsWith("{")) {
             val jsMap: Map<String, String>? = try { GSON.fromJsonObject(jsLib) } catch (_: Exception) { null }

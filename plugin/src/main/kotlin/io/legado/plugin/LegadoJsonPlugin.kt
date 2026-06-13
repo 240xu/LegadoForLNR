@@ -9,8 +9,8 @@ import io.nightfish.lightnovelreader.api.web.WebBookDataSourceManagerApi
 
 @Plugin(
     name = "Legado JSON 书源",
-    version = 18,
-    versionName = "1.4.4",
+    version = 19,
+    versionName = "1.5.0",
     author = "LNR Legado Plugin",
     description = "支持导入 lyc486 版 Legado JSON 书源。完整实现6种规则解析、loginUi登录、发现页useweb、并发限速、Cookie管理、字体反爬、图片解密。",
     updateUrl = "",
