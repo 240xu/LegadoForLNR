@@ -10,13 +10,7 @@ interface BaseBook : RuleDataInterface {
     var durChapterIndex: Int
 
     override fun putVariable(key: String, value: String?): Boolean {
-        val keyExist = variableMap.contains(key)
-        if (value == null) {
-            variableMap.remove(key)
-        } else {
-            variableMap[key] = value
-        }
-        return keyExist
+        return super.putVariable(key, value)
     }
 
     override fun putVariable(value: String): Boolean {

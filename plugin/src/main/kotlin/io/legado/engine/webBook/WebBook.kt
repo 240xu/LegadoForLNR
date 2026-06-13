@@ -297,7 +297,7 @@ object BookChapterList {
                         isVolume = rule.isVolume?.let { runCatching { toBooleanLenient(itemAr.getString(it)) }.getOrNull() } ?: false,
                         isVip = rule.isVip?.let { runCatching { toBooleanLenient(itemAr.getString(it)) }.getOrNull() } ?: false,
                         isPay = rule.isPay?.let { runCatching { toBooleanLenient(itemAr.getString(it)) }.getOrNull() } ?: false,
-                        updateTime = rule.updateTime?.let { runCatching { itemAr.getString(it).toLongOrNull() ?: 0L }.getOrNull() } ?: 0L
+                        tag = rule.updateTime?.let { runCatching { itemAr.getString(it).trim() }.getOrNull()?.takeIf { s -> s.isNotBlank() } }
                     ))
                 } catch (_: Exception) {}
             }

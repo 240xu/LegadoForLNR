@@ -35,7 +35,9 @@ class AnalyzeUrl(
     headerMapF: Map<String, String>? = null,
     hasLoginHeader: Boolean = true,
     private val infoMap: MutableMap<String, String>? = null,
-    private val useCookie: Boolean = true
+    private val useCookie: Boolean = true,
+    private val speakText: String? = null,
+    private val speakSpeed: Int? = null
 ) : JsExtensions {
 
     var ruleUrl = ""; private set
@@ -109,10 +111,6 @@ class AnalyzeUrl(
                 }
             }
             if (url.isNotEmpty()) ruleUrl = url
-        }
-        key?.let { k ->
-            // Legado 不对 {{key}} 做 URL 编码，直接替换原始值
-            ruleUrl = ruleUrl.replace("{{key}}", k)
         }
         page?.let { p ->
             // Legado 标准格式: <1,2,3> 逗号列表按页码索引取值
@@ -194,7 +192,7 @@ class AnalyzeUrl(
                 } else response
             } catch (e: Exception) {
                 lastError = e
-                if (attempt < retry) Thread.sleep(300L * (attempt + 1))
+                if (attempt < retry && !Thread.interrupted()) Thread.sleep(300L * (attempt + 1))
             }
         }
         Debug.log("AnalyzeUrl execute error: " + lastError?.message)
@@ -263,6 +261,8 @@ class AnalyzeUrl(
             b["page"] = page ?: 1
             b["url"] = url
             b["infoMap"] = infoMap
+            b["speakText"] = speakText
+            b["speakSpeed"] = speakSpeed
         }
         return try {
             val sharedScope = source?.let { SharedJsScope.getScope(it.jsLib) }

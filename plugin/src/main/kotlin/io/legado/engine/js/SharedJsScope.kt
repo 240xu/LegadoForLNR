@@ -19,15 +19,16 @@ import java.security.MessageDigest
  */
 object SharedJsScope {
 
-    private val scopeMap = object : java.util.LinkedHashMap<String, Scriptable>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Scriptable>?): Boolean = size > 16
+    private val scopeMap = object : java.util.LinkedHashMap<String, java.lang.ref.SoftReference<Scriptable>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, java.lang.ref.SoftReference<Scriptable>>?): Boolean = size > 16
     }
     private val jsFileCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     fun getScope(jsLib: String?): Scriptable? {
         if (jsLib.isNullOrBlank()) return null
         val key = md5(jsLib)
-        var scope = synchronized(scopeMap) { scopeMap[key] }
+        val ref = synchronized(scopeMap) { scopeMap[key] }
+        var scope = ref?.get()
         if (scope == null) {
             scope = RhinoScriptEngine.getRuntimeScope(ScriptBindings())
             try {
@@ -55,7 +56,7 @@ object SharedJsScope {
             } catch (e: Exception) {
                 Debug.log("jsLib eval error: ${e.message}")
             }
-            synchronized(scopeMap) { scopeMap[key] = scope }
+            synchronized(scopeMap) { scopeMap[key] = java.lang.ref.SoftReference(scope) }
         }
         return scope
     }

@@ -327,6 +327,7 @@ class AnalyzeRule(
             b["baseUrl"] = baseUrl ?: ""; b["chapter"] = chapter
             b["title"] = chapter?.title ?: ""; b["src"] = content ?: ""
             b["nextChapterUrl"] = nextChapterUrl ?: ""
+            b["fromBookInfo"] = false
         }
         val sharedScope = source?.let { SharedJsScope.getScope(it.jsLib) }
         val scope = if (sharedScope == null) {
