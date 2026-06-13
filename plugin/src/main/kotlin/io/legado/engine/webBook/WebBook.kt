@@ -94,8 +94,8 @@ object WebBook {
             allChapters.addAll(chapters)
             currentUrl = if (!rule.nextTocUrl.isNullOrBlank()) {
                 val ar = AnalyzeRule(source = bookSource).setContent(res.body, currentUrl)
-                val next = ar.getString(rule.nextTocUrl!!)
-                if (next.isNotBlank() && next != currentUrl) AnalyzeUrl.getAbsoluteURL(currentUrl!!, next) else null
+                val next = ar.getString(rule.nextTocUrl!!, isUrl = true)
+                if (next.isNotBlank() && next != currentUrl) next else null
             } else null
             pageCount++
         }
@@ -284,14 +284,10 @@ object BookChapterList {
                     val chUrl = itemAr.getString(rule.chapterUrl ?: "", isUrl = true).trim()
                     if (chName.isBlank() && chUrl.isBlank()) continue
                     val absUrl = AnalyzeUrl.getAbsoluteURL(baseUrl, chUrl)
-                    var finalTitle = chName
-                    if (!rule.formatJs.isNullOrBlank()) {
-                        try { val fAr = AnalyzeRule(source = bookSource).setContent(chName, absUrl); val formatted = fAr.getString(rule.formatJs!!); if (formatted.isNotBlank()) finalTitle = formatted } catch (_: Exception) {}
-                    }
                     chapters.add(BookChapter(
                         bookUrl = book.bookUrl,
                         url = absUrl,
-                        title = finalTitle.ifBlank { "unknown" },
+                        title = chName.ifBlank { "unknown" },
                         index = index,
                         baseUrl = baseUrl,
                         isVolume = rule.isVolume?.let { runCatching { toBooleanLenient(itemAr.getString(it)) }.getOrNull() } ?: false,
@@ -300,6 +296,19 @@ object BookChapterList {
                         tag = rule.updateTime?.let { runCatching { itemAr.getString(it).trim() }.getOrNull()?.takeIf { s -> s.isNotBlank() } }
                     ))
                 } catch (_: Exception) {}
+            }
+            // 批量应用 formatJs（与 Legado 一致，共享 gInt 计数器）
+            if (!rule.formatJs.isNullOrBlank()) {
+                val gInt = intArrayOf(0)
+                for (ch in chapters) {
+                    try {
+                        val fAr = AnalyzeRule(ruleData = book, source = bookSource).setContent(ch.title, ch.url)
+                        fAr.put("gInt", gInt[0].toString())
+                        val formatted = fAr.getString(rule.formatJs!!)
+                        if (formatted.isNotBlank()) ch.title = formatted
+                        gInt[0]++
+                    } catch (_: Exception) { gInt[0]++ }
+                }
             }
         } catch (e: Exception) { Debug.log("BookChapterList error: " + e.message) }
         return chapters

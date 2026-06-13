@@ -72,23 +72,33 @@ interface JsExtensions {
         }
     }
 
-    fun connect(urlStr: String): io.legado.engine.http.JsoupResponse {
-        val headers = mergeCookies(urlStr, getSource()?.getHeaderMap(true) ?: emptyMap())
-        return io.legado.engine.http.JsoupResponse(Jsoup.connect(urlStr).sslSocketFactory(io.legado.engine.http.SSLHelper.unsafeSSLSocketFactory).timeout(30000).ignoreContentType(true).followRedirects(true).headers(headers).method(Connection.Method.GET).execute())
+    fun connect(urlStr: String): io.legado.engine.http.StrResponse {
+        return try {
+            val analyzeUrl = AnalyzeUrl(urlStr, source = getSource())
+            io.legado.engine.http.StrResponse(analyzeUrl.execute())
+        } catch (e: Exception) {
+            io.legado.engine.http.StrResponse(io.legado.engine.http.HttpResponse(urlStr, e.stackTraceToString(), 500))
+        }
     }
 
-    fun connect(urlStr: String, header: String?): io.legado.engine.http.JsoupResponse {
-        val headerMap = if (header != null) GSON.fromJsonObject<Map<String, String>>(header) ?: emptyMap() else emptyMap()
-        val baseHeaders = getSource()?.getHeaderMap(true) ?: emptyMap()
-        val merged = mergeCookies(urlStr, baseHeaders.toMutableMap().apply { putAll(headerMap) })
-        return io.legado.engine.http.JsoupResponse(Jsoup.connect(urlStr).sslSocketFactory(io.legado.engine.http.SSLHelper.unsafeSSLSocketFactory).timeout(30000).ignoreContentType(true).followRedirects(true).headers(merged).method(Connection.Method.GET).execute())
+    fun connect(urlStr: String, header: String?): io.legado.engine.http.StrResponse {
+        return try {
+            val headerMap = if (header != null) GSON.fromJsonObject<Map<String, String>>(header) ?: emptyMap() else emptyMap()
+            val analyzeUrl = AnalyzeUrl(urlStr, source = getSource(), headerMapF = headerMap)
+            io.legado.engine.http.StrResponse(analyzeUrl.execute())
+        } catch (e: Exception) {
+            io.legado.engine.http.StrResponse(io.legado.engine.http.HttpResponse(urlStr, e.stackTraceToString(), 500))
+        }
     }
 
-    fun connect(urlStr: String, header: String?, callTimeout: Long?): io.legado.engine.http.JsoupResponse {
-        val headerMap = if (header != null) GSON.fromJsonObject<Map<String, String>>(header) ?: emptyMap() else emptyMap()
-        val baseHeaders = getSource()?.getHeaderMap(true) ?: emptyMap()
-        val merged = mergeCookies(urlStr, baseHeaders.toMutableMap().apply { putAll(headerMap) })
-        return io.legado.engine.http.JsoupResponse(Jsoup.connect(urlStr).sslSocketFactory(io.legado.engine.http.SSLHelper.unsafeSSLSocketFactory).timeout((callTimeout ?: 30000L).toInt()).ignoreContentType(true).followRedirects(true).headers(merged).method(Connection.Method.GET).execute())
+    fun connect(urlStr: String, header: String?, callTimeout: Long?): io.legado.engine.http.StrResponse {
+        return try {
+            val headerMap = if (header != null) GSON.fromJsonObject<Map<String, String>>(header) ?: emptyMap() else emptyMap()
+            val analyzeUrl = AnalyzeUrl(urlStr, source = getSource(), headerMapF = headerMap, callTimeout = callTimeout)
+            io.legado.engine.http.StrResponse(analyzeUrl.execute())
+        } catch (e: Exception) {
+            io.legado.engine.http.StrResponse(io.legado.engine.http.HttpResponse(urlStr, e.stackTraceToString(), 500))
+        }
     }
 
     fun get(urlStr: String, headers: Map<String, String>): io.legado.engine.http.JsoupResponse = get(urlStr, headers, null)
