@@ -245,7 +245,6 @@ class LegadoJsonWebDataSource(
 
     // ==================== ExplorePageProvider ====================
     override val explorePageProvider: ExplorePageProvider = object :
-        ExplorePageProvider.DefaultExplorePageProvider,
         ExplorePageProvider.CustomExplorePageProvider<LegadoExploreUiState> {
         override val uiState = LegadoExploreUiState()
 
@@ -261,10 +260,10 @@ class LegadoJsonWebDataSource(
                 .associateWith { parseExploreKinds(it) }
                 .filterValues { it.isNotEmpty() }
 
-        override val explorePageIdList: List<String>
+        val explorePageIdList: List<String>
             get() = sourceKinds.keys.map { it.bookSourceUrl }
 
-        override val exploreTapPageDataSourceMap: Map<String, ExploreTapPageDataSource>
+        val exploreTapPageDataSourceMap: Map<String, ExploreTapPageDataSource>
             get() {
                 val result = linkedMapOf<String, ExploreTapPageDataSource>()
                 sourceKinds.forEach { (src, kinds) ->
@@ -303,7 +302,7 @@ class LegadoJsonWebDataSource(
                 return result
             }
 
-        override val exploreExpandedPageDataSourceMap: Map<String, ExploreExpandedPageDataSource>
+        val exploreExpandedPageDataSourceMap: Map<String, ExploreExpandedPageDataSource>
             get() {
                 val result = linkedMapOf<String, ExploreExpandedPageDataSource>()
                 sourceKinds.forEach { (src, kinds) ->
