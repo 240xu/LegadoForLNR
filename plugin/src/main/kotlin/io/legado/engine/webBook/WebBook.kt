@@ -30,22 +30,25 @@ object WebBook {
                     b["book"] = null
                     b["chapter"] = null
                 }
-                if (checkResult == false || checkResult?.toString() == "false") {
-                    Debug.log("loginCheckJs failed for ${bookSource.bookSourceName}")
-                    val loginJs = bookSource.getLoginJs()
-                    if (!loginJs.isNullOrBlank()) {
-                        try { bookSource.evalJS(loginJs) } catch (e: Exception) {
-                            Debug.log("loginJs exec error: ${e.message}")
-                        }
+                // 按Opus建议：StrResponse优先判断，避免toString()误判
+                when {
+                    checkResult is io.legado.engine.http.StrResponse -> {
+                        response = io.legado.engine.http.HttpResponse(
+                            checkResult.url, checkResult.body(), checkResult.code, checkResult.headers
+                        )
                     }
-                    SourceLoginCallback.requestLogin(bookSource)
-                    applyRateLimit(bookSource)
-                    response = analyzeUrl.execute()
-                } else if (checkResult is io.legado.engine.http.StrResponse) {
-                    // checkJs 返回了修改后的 StrResponse
-                    response = io.legado.engine.http.HttpResponse(
-                        checkResult.url, checkResult.body(), checkResult.code, checkResult.headers
-                    )
+                    checkResult == false || checkResult?.toString() == "false" -> {
+                        Debug.log("loginCheckJs failed for ${bookSource.bookSourceName}")
+                        val loginJs = bookSource.getLoginJs()
+                        if (!loginJs.isNullOrBlank()) {
+                            try { bookSource.evalJS(loginJs) } catch (e: Exception) {
+                                Debug.log("loginJs exec error: ${e.message}")
+                            }
+                        }
+                        SourceLoginCallback.requestLogin(bookSource)
+                        applyRateLimit(bookSource)
+                        response = analyzeUrl.execute()
+                    }
                 }
             } catch (e: Exception) {
                 Debug.log("loginCheckJs error: ${e.message}")

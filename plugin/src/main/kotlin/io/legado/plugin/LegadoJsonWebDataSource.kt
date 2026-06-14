@@ -825,7 +825,11 @@ class LegadoJsonWebDataSource(
 
     private fun parseSourceElement(element: JsonElement): BookSource? {
         return runCatching {
-            gson.fromJson(migrateSourceJson(element), BookSource::class.java)
+            gson.fromJson(migrateSourceJson(element), BookSource::class.java)?.also { src ->
+                // Gson不会使用Kotlin默认值，缺失字段为null。补全关键默认值。
+                if (src.enabledCookieJar == null) src.enabledCookieJar = true
+                if (src.enabledExplore == null) src.enabledExplore = true  // 但enabledExplore是Boolean非空，不需要
+            }
         }.getOrNull()
     }
 

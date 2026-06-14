@@ -231,7 +231,12 @@ class AnalyzeRule(
                     val r = sr.rule
                     if (r.isNotBlank() || sr.replaceRegex.isEmpty()) {
                         result = when (sr.mode) {
-                            Mode.WebJs -> evalJS(r, result)?.toString() ?: ""
+                            Mode.WebJs -> io.legado.engine.webview.BackstageWebView.getSource(
+                                html = content?.toString(),
+                                url = baseUrl,
+                                js = r,
+                                headerMap = source?.getHeaderMap(true)
+                            ).body ?: ""
                             Mode.Js -> evalJS(r, result)
                             Mode.Json -> getAnalyzeByJSonPath(result).getString(r)
                             Mode.XPath -> getAnalyzeByXPath(result).getString(r)
