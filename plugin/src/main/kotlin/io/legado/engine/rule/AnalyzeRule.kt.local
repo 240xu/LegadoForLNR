@@ -146,14 +146,7 @@ class AnalyzeRule(
                 val r = sr.rule
                 if (r.isNotEmpty()) {
                     result = when (sr.mode) {
-                        Mode.WebJs -> {
-                            val webResult = io.legado.engine.webview.BackstageWebView.getSource(
-                                html = content?.toString(), url = baseUrl, js = r,
-                                headerMap = source?.getHeaderMap(true)
-                            ).body ?: ""
-                            parseWebJsList(webResult)
-                        }
-                        Mode.Js -> evalJS(r, result)
+                        Mode.Js, Mode.WebJs -> evalJS(r, result)
                         Mode.Json -> getAnalyzeByJSonPath(result).getStringList(r)
                         Mode.XPath -> getAnalyzeByXPath(result).getStringList(r)
                         Mode.Regex -> { val rr = AnalyzeByRegex.getElement(result.toString(), r.split("&&").toTypedArray()); if (rr is List<*>) rr.map { it.toString() } else listOf(rr.toString()) }
@@ -286,14 +279,7 @@ class AnalyzeRule(
             putRule(sr.putMap); result ?: continue
             val r = sr.rule
             result = when (sr.mode) {
-                Mode.WebJs -> {
-                    val webResult = io.legado.engine.webview.BackstageWebView.getSource(
-                        html = content?.toString(), url = baseUrl, js = r,
-                        headerMap = source?.getHeaderMap(true)
-                    ).body ?: ""
-                    parseWebJsObject(webResult) ?: evalJS(r, result)
-                }
-                Mode.Js -> evalJS(r, result)
+                Mode.Js, Mode.WebJs -> evalJS(r, result)
                 Mode.Json -> getAnalyzeByJSonPath(result).getObject(r)
                 Mode.XPath -> getAnalyzeByXPath(result).getElements(r)
                 Mode.Regex -> AnalyzeByRegex.getElement(result.toString(), r.split("&&").toTypedArray())
@@ -311,14 +297,7 @@ class AnalyzeRule(
             putRule(sr.putMap); result ?: continue
             val r = sr.rule
             result = when (sr.mode) {
-                Mode.WebJs -> {
-                    val webResult = io.legado.engine.webview.BackstageWebView.getSource(
-                        html = content?.toString(), url = baseUrl, js = r,
-                        headerMap = source?.getHeaderMap(true)
-                    ).body ?: ""
-                    parseWebJsArray(webResult)
-                }
-                Mode.Js -> evalJS(r, result)
+                Mode.Js, Mode.WebJs -> evalJS(r, result)
                 Mode.Json -> getAnalyzeByJSonPath(result).getList(r)
                 Mode.XPath -> getAnalyzeByXPath(result).getElements(r)
                 Mode.Regex -> AnalyzeByRegex.getElements(result.toString(), r.split("&&").toTypedArray())
@@ -336,14 +315,7 @@ class AnalyzeRule(
             putRule(sr.putMap); result ?: continue
             val r = sr.rule
             result = when (sr.mode) {
-                Mode.WebJs -> {
-                    val webResult = io.legado.engine.webview.BackstageWebView.getSource(
-                        html = content?.toString(), url = baseUrl, js = r,
-                        headerMap = source?.getHeaderMap(true)
-                    ).body ?: ""
-                    parseWebJsObject(webResult) ?: evalJS(r, result)
-                }
-                Mode.Js -> evalJS(r, result)
+                Mode.Js, Mode.WebJs -> evalJS(r, result)
                 Mode.Json -> getAnalyzeByJSonPath(result).getObject(r)
                 Mode.XPath -> getAnalyzeByXPath(result).getElements(r)
                 else -> getAnalyzeByJSoup(result).getElements(r)
@@ -380,18 +352,7 @@ class AnalyzeRule(
     }
 
     fun put(key: String, value: String): String { chapter?.putVariable(key, value) ?: book?.putVariable(key, value) ?: ruleData?.putVariable(key, value) ?: source?.put(key, value); return value }
-    fun get(key: String): String {
-        // Legado 特殊处理：bookName 和 title 直接返回
-        when (key) {
-            "bookName" -> (ruleData as? io.legado.engine.data.Book)?.let { return it.name }
-            "title" -> chapter?.let { return it.title }
-        }
-        return chapter?.getVariable(key)?.takeIf { it.isNotEmpty() }
-            ?: book?.getVariable(key)?.takeIf { it.isNotEmpty() }
-            ?: ruleData?.getVariable(key)?.takeIf { it.isNotEmpty() }
-            ?: source?.get(key)?.takeIf { it.isNotEmpty() }
-            ?: ""
-    }
+    fun get(key: String): String { return chapter?.getVariable(key)?.takeIf { it.isNotEmpty() } ?: book?.getVariable(key)?.takeIf { it.isNotEmpty() } ?: ruleData?.getVariable(key)?.takeIf { it.isNotEmpty() } ?: source?.get(key)?.takeIf { it.isNotEmpty() } ?: "" }
     fun put(value: String): String { chapter?.putVariable(value) ?: book?.putVariable(value) ?: ruleData?.putVariable(value) ?: source?.putVariable(value); return value }
     fun get(): String { return chapter?.getVariable()?.takeIf { it.isNotEmpty() } ?: book?.getVariable()?.takeIf { it.isNotEmpty() } ?: ruleData?.getVariable()?.takeIf { it.isNotEmpty() } ?: source?.getVariable().orEmpty() }
 
@@ -595,30 +556,6 @@ class AnalyzeRule(
         }
 
         fun getParamSize(): Int = ruleParam.size
-    }
-
-    /** WebJs结果解析为字符串列表（getStringList用） */
-    private fun parseWebJsList(webResult: String): Any {
-        return try {
-            val arr = com.google.gson.Gson().fromJson<Array<String>>(webResult, Array<String>::class.java)
-            if (arr != null && arr.isNotEmpty()) arr.toList() else listOf(webResult)
-        } catch (_: Exception) { webResult.split("\n") }
-    }
-
-    /** WebJs结果解析为Map对象（getElement/getObject用） */
-    private fun parseWebJsObject(webResult: String): Any? {
-        return try {
-            val type = com.google.gson.reflect.TypeToken.getParameterized(Map::class.java, String::class.java, Any::class.java).type
-            com.google.gson.Gson().fromJson<Map<String, Any?>>(webResult, type)
-        } catch (_: Exception) { null }
-    }
-
-    /** WebJs结果解析为列表（getElements用） */
-    private fun parseWebJsArray(webResult: String): Any {
-        return try {
-            val type = com.google.gson.reflect.TypeToken.getParameterized(List::class.java, Map::class.java).type
-            com.google.gson.Gson().fromJson<List<Map<String, Any?>>>(webResult, type) ?: listOf(webResult)
-        } catch (_: Exception) { webResult.split("\n") }
     }
 
     companion object {
