@@ -1505,8 +1505,15 @@ class LegadoJsonWebDataSource(
             tags = book.kind?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList(),
             publishingHouse = "",
             wordCount = WordCount(book.wordCount?.filter { it.isDigit() }?.toIntOrNull() ?: 0),
-            lastUpdated = LocalDateTime.MIN,
-            isComplete = false
+            lastUpdated = try {
+                if (book.time > 0) LocalDateTime.ofInstant(
+                    java.time.Instant.ofEpochMilli(book.time),
+                    java.time.ZoneId.systemDefault()
+                ) else LocalDateTime.MIN
+            } catch (_: Exception) { LocalDateTime.MIN },
+            isComplete = book.latestChapterTitle?.contains("完结") == true ||
+                book.latestChapterTitle?.contains("完結") == true ||
+                book.latestChapterTitle?.contains("已完结") == true
         )
     }
 
@@ -1602,8 +1609,15 @@ class LegadoJsonWebDataSource(
                 tags = book.kind?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList(),
                 publishingHouse = "",
                 wordCount = WordCount(book.wordCount?.filter { it.isDigit() }?.toIntOrNull() ?: 0),
-                lastUpdated = LocalDateTime.MIN,
-                isComplete = false
+                lastUpdated = try {
+                    if (book.lastCheckTime > 0) LocalDateTime.ofInstant(
+                        java.time.Instant.ofEpochMilli(book.lastCheckTime),
+                        java.time.ZoneId.systemDefault()
+                    ) else LocalDateTime.MIN
+                } catch (_: Exception) { LocalDateTime.MIN },
+                isComplete = book.latestChapterTitle?.contains("完结") == true ||
+                    book.latestChapterTitle?.contains("完結") == true ||
+                    book.latestChapterTitle?.contains("已完结") == true
             )
         } catch (_: Exception) { BookInformation.empty(id) }
     }
