@@ -71,16 +71,20 @@ object WebBook {
     fun searchBookAwait(bookSource: BookSource, key: String, page: Int? = 1): ArrayList<SearchBook> {
         val searchUrl = bookSource.searchUrl
         if (searchUrl.isNullOrBlank()) return arrayListOf()
-        val analyzeUrl = AnalyzeUrl(mUrl = searchUrl, key = key, page = page, baseUrl = bookSource.bookSourceUrl, source = bookSource)
+        val ruleData = RuleData()
+        val analyzeUrl = AnalyzeUrl(mUrl = searchUrl, key = key, page = page, baseUrl = bookSource.bookSourceUrl, source = bookSource, ruleData = ruleData)
         val res = executeWithLoginCheck(bookSource, analyzeUrl)
         val rule = bookSource.getSearchRule()
         return BookList.analyzeBookList(bookSource, analyzeUrl, res.url, res.body, rule, isSearch = true)
     }
 
     fun exploreBookAwait(bookSource: BookSource, url: String, page: Int? = 1, infoMap: MutableMap<String, String>? = null): ArrayList<SearchBook> {
-        val analyzeUrl = AnalyzeUrl(mUrl = url, page = page, baseUrl = bookSource.bookSourceUrl, source = bookSource, infoMap = infoMap)
+        val ruleData = RuleData()
+        val analyzeUrl = AnalyzeUrl(mUrl = url, page = page, baseUrl = bookSource.bookSourceUrl, source = bookSource, ruleData = ruleData, infoMap = infoMap)
         val res = executeWithLoginCheck(bookSource, analyzeUrl)
-        val rule = bookSource.getExploreRule()
+        // Legado: ruleExplore.bookList 为空时回退到 ruleSearch
+        val exploreRule = bookSource.getExploreRule()
+        val rule = if (exploreRule.bookList.isNullOrBlank()) bookSource.getSearchRule() else exploreRule
         return BookList.analyzeBookList(bookSource, analyzeUrl, res.url, res.body, rule, isSearch = false)
     }
 
@@ -130,29 +134,52 @@ object WebBook {
         while (currentUrl != null && pageCount < 10) {
             val analyzeUrl = AnalyzeUrl(mUrl = currentUrl!!, baseUrl = book.tocUrl ?: book.bookUrl, source = bookSource, ruleData = book, chapter = bookChapter)
             val res = executeWithLoginCheck(bookSource, analyzeUrl)
-            var body = if (!contentRule.sourceRegex.isNullOrBlank()) {
-                try { Regex(contentRule.sourceRegex!!).find(res.body)?.value ?: res.body } catch (_: Exception) { res.body }
-            } else res.body
-            val ar = AnalyzeRule(source = bookSource).setContent(body, res.url)
-            ar.setChapter(bookChapter)
+            var body = res.body
+            val headerMap = bookSource.getHeaderMap(false)
+            // Legado: webJs 和 sourceRegex 通过 BackstageWebView 在 WebView 中执行
             if (!contentRule.webJs.isNullOrBlank()) {
-                // webJs 应在 WebView 上下文中执行（可访问DOM），回退到 Rhino
                 val webResult = try {
                     io.legado.engine.webview.BackstageWebView.getSource(
-                        html = body, url = res.url, js = contentRule.webJs!!, headerMap = bookSource.getHeaderMap(false)
+                        html = body, url = res.url, js = contentRule.webJs!!, headerMap = headerMap
                     )
                 } catch (_: Exception) { null }
-                (webResult?.body ?: ar.evalJS(contentRule.webJs!!, body)?.toString())?.takeIf { it.isNotBlank() }?.let { webBody ->
-                    body = webBody
-                    ar.setContent(body, res.url).setChapter(bookChapter)
+                if (webResult != null) {
+                    body = if (!contentRule.sourceRegex.isNullOrBlank()) {
+                        try { Regex(contentRule.sourceRegex!!).find(webResult.body)?.value ?: webResult.body } catch (_: Exception) { webResult.body }
+                    } else webResult.body
+                } else {
+                    // 回退到 Rhino
+                    val ar = AnalyzeRule(source = bookSource).setContent(body, res.url)
+                    body = (ar.evalJS(contentRule.webJs!!, body)?.toString() ?: body)
+                    if (!contentRule.sourceRegex.isNullOrBlank()) {
+                        body = try { Regex(contentRule.sourceRegex!!).find(body)?.value ?: body } catch (_: Exception) { body }
+                    }
                 }
+            } else if (!contentRule.sourceRegex.isNullOrBlank()) {
+                body = try { Regex(contentRule.sourceRegex!!).find(body)?.value ?: body } catch (_: Exception) { body }
             }
+            val ar = AnalyzeRule(source = bookSource).setContent(body, res.url)
+            ar.setChapter(bookChapter)
             // Legado: content = analyzeRule.getString(contentRule.content, unescape = false)
             val contentStr = ar.getString(contentRule.content ?: "", unescape = false)
             // Legado: HtmlFormatter.formatKeepImg - 保留图片的HTML格式化
             val formatted = formatContentHtml(contentStr, res.url)
             allParts.addAll(formatted.split("\n").filter { it.isNotBlank() })
-            if (!contentRule.subContent.isNullOrBlank()) allParts.addAll(ar.getStringList(contentRule.subContent!!) ?: emptyList())
+            if (!contentRule.subContent.isNullOrBlank()) {
+                val subParts = ar.getStringList(contentRule.subContent!!) ?: emptyList()
+                for (sub in subParts) {
+                    // Legado: subContent 如果是HTTP URL则获取内容
+                    if (sub.startsWith("http://") || sub.startsWith("https://")) {
+                        try {
+                            val subUrl = AnalyzeUrl(mUrl = sub, baseUrl = res.url, source = bookSource, ruleData = book, chapter = bookChapter)
+                            val subRes = executeWithLoginCheck(bookSource, subUrl)
+                            if (subRes.body.isNotBlank()) allParts.add(subRes.body)
+                        } catch (_: Exception) { allParts.add(sub) }
+                    } else {
+                        allParts.add(sub)
+                    }
+                }
+            }
             if (chTitle.isBlank() && !contentRule.title.isNullOrBlank()) chTitle = ar.getString(contentRule.title!!)
             // Legado: nextContentUrl 使用 getStringList(isUrl=true) 支持多URL
             currentUrl = if (!contentRule.nextContentUrl.isNullOrBlank()) {
