@@ -24,12 +24,9 @@ object WebBook {
         var response = analyzeUrl.execute()
         if (!loginCheckJs.isNullOrBlank()) {
             try {
-                // Legado 模式：将 response 作为 result 绑定传给 evalJS
-                val checkResult = bookSource.evalJS(loginCheckJs) { b ->
-                    b["result"] = io.legado.engine.http.StrResponse(response)
-                    b["book"] = null
-                    b["chapter"] = null
-                }
+                // Legado: analyzeUrl.evalJS(checkJs, StrResponse)
+                val strResp = io.legado.engine.http.StrResponse(response)
+                val checkResult = analyzeUrl.evalJS(loginCheckJs, strResp)
                 // 按Opus建议：StrResponse优先判断，避免toString()误判
                 when {
                     checkResult is io.legado.engine.http.StrResponse -> {
@@ -51,6 +48,20 @@ object WebBook {
                     }
                 }
             } catch (e: Exception) {
+                // Legado: 即使请求失败也执行 checkJs，传入错误响应
+                if (!loginCheckJs.isNullOrBlank()) {
+                    try {
+                        val errResp = io.legado.engine.http.StrResponse(
+                            io.legado.engine.http.HttpResponse(analyzeUrl.url, e.message ?: "", 500)
+                        )
+                        val checkResult = analyzeUrl.evalJS(loginCheckJs, errResp)
+                        if (checkResult is io.legado.engine.http.StrResponse && checkResult.code != 500) {
+                            response = io.legado.engine.http.HttpResponse(
+                                checkResult.url, checkResult.body(), checkResult.code, checkResult.headers
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }
                 Debug.log("loginCheckJs error: ${e.message}")
             }
         }
@@ -97,8 +108,9 @@ object WebBook {
             allChapters.addAll(chapters)
             currentUrl = if (!rule.nextTocUrl.isNullOrBlank()) {
                 val ar = AnalyzeRule(source = bookSource).setContent(res.body, currentUrl)
-                val next = ar.getString(rule.nextTocUrl!!, isUrl = true)
-                if (next.isNotBlank() && next != currentUrl) next else null
+                // Legado: getStringList(nextTocRule, isUrl=true) 支持多URL
+                val nextUrls = ar.getStringList(rule.nextTocUrl!!, isUrl = true)
+                nextUrls?.firstOrNull { it.isNotBlank() && it != currentUrl }
             } else null
             pageCount++
         }
@@ -135,17 +147,28 @@ object WebBook {
                     ar.setContent(body, res.url).setChapter(bookChapter)
                 }
             }
-            allParts.addAll(ar.getStringList(contentRule.content ?: "") ?: emptyList())
+            // Legado: content = analyzeRule.getString(contentRule.content, unescape = false)
+            val contentStr = ar.getString(contentRule.content ?: "", unescape = false)
+            // Legado: HtmlFormatter.formatKeepImg - 保留图片的HTML格式化
+            val formatted = formatContentHtml(contentStr, res.url)
+            allParts.addAll(formatted.split("\n").filter { it.isNotBlank() })
             if (!contentRule.subContent.isNullOrBlank()) allParts.addAll(ar.getStringList(contentRule.subContent!!) ?: emptyList())
             if (chTitle.isBlank() && !contentRule.title.isNullOrBlank()) chTitle = ar.getString(contentRule.title!!)
+            // Legado: nextContentUrl 使用 getStringList(isUrl=true) 支持多URL
             currentUrl = if (!contentRule.nextContentUrl.isNullOrBlank()) {
-                val next = ar.getString(contentRule.nextContentUrl!!)
-                if (next.isNotBlank() && next != currentUrl) AnalyzeUrl.getAbsoluteURL(res.url, next) else null
+                val nextUrls = ar.getStringList(contentRule.nextContentUrl!!, isUrl = true)
+                nextUrls?.firstOrNull { it.isNotBlank() && it != currentUrl }?.let {
+                    AnalyzeUrl.getAbsoluteURL(res.url, it)
+                }
             } else null
             pageCount++
         }
         var content = allParts.joinToString("\n")
-        if (!contentRule.replaceRegex.isNullOrBlank()) content = applyReplaceRegex(content, contentRule.replaceRegex!!)
+        // Legado: replaceRegex 通过 analyzeRule.getString 解析，支持 @get/{{}} 规则
+        if (!contentRule.replaceRegex.isNullOrBlank()) {
+            val replaceAr = AnalyzeRule(source = bookSource).setContent(content, book.tocUrl ?: book.bookUrl)
+            content = replaceAr.getString(contentRule.replaceRegex!!, content)
+        }
         return content
     }
 
@@ -184,6 +207,20 @@ object WebBook {
             } catch (_: Exception) {}
         }
         return result
+    }
+
+    /** Legado HtmlFormatter.formatKeepImg */
+    private fun formatContentHtml(html: String, baseUrl: String): String {
+        if (html.isBlank()) return ""
+        return try {
+            val doc = org.jsoup.Jsoup.parseBodyFragment(html, baseUrl)
+            val imgs = doc.select("img")
+            val imgSrcs = imgs.map { it.attr("src") }.filter { it.isNotBlank() }
+            val text = doc.body().text()
+            val sb = StringBuilder(text)
+            imgSrcs.forEach { src -> sb.appendLine("<img src=\"$src\">") }
+            sb.toString()
+        } catch (_: Exception) { html }
     }
 }
 
@@ -277,9 +314,14 @@ object BookInfo {
 object BookChapterList {
     fun analyzeChapterList(bookSource: BookSource, book: Book, baseUrl: String, body: String, rule: io.legado.engine.data.rule.TocRule): List<BookChapter> {
         val chapters = mutableListOf<BookChapter>()
+        // Legado: chapterList 支持 - 前缀反转、+ 前缀去除
+        var listRule = rule.chapterList ?: ""
+        var reverse = false
+        if (listRule.startsWith("-")) { reverse = true; listRule = listRule.substring(1) }
+        if (listRule.startsWith("+")) { listRule = listRule.substring(1) }
         try {
             val ar = AnalyzeRule(source = bookSource).setContent(body, baseUrl)
-            val elements = ar.getElements(rule.chapterList ?: "")
+            val elements = ar.getElements(listRule)
             for ((index, element) in elements.withIndex()) {
                 try {
                     val itemAr = AnalyzeRule(ruleData = book, source = bookSource).setContent(element, baseUrl)
@@ -314,6 +356,7 @@ object BookChapterList {
                 }
             }
         } catch (e: Exception) { Debug.log("BookChapterList error: " + e.message) }
+        if (reverse) chapters.reverse()
         return chapters
     }
 
