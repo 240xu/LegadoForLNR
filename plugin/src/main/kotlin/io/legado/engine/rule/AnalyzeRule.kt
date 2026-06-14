@@ -542,9 +542,10 @@ class AnalyzeRule(
                             } ?: infoVal.insert(0, ruleParam[index])
                         }
                         regType == jsRuleType -> {
-                            // {{JS表达式}}
+                            // {{JS表达式}} 或 {{规则}}
                             val inner = ruleParam[index]
-                            val jsResult = if (inner.startsWith("$.") || inner.startsWith("$[")) {
+                            val jsResult = if (inner.startsWith("$.") || inner.startsWith("$[") || inner.startsWith("//") || inner.startsWith("@")) {
+                                // Legado: $.、$[、//、@ 开头的作为规则解析
                                 analyzer.getString(inner, currentResult)
                             } else {
                                 analyzer.evalJS(inner, currentResult)

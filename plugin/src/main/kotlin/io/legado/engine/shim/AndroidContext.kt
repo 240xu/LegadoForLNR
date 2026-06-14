@@ -18,10 +18,11 @@ object AndroidContext {
 
     fun getAndroidId(): String {
         return try {
-            android.provider.Settings.Secure.getString(
+            // Legado: Settings.System + fallback "null"
+            android.provider.Settings.System.getString(
                 appCtx.contentResolver,
                 android.provider.Settings.Secure.ANDROID_ID
-            ) ?: "0000000000000000"
-        } catch (_: Exception) { "0000000000000000" }
+            ) ?: "null"
+        } catch (_: Exception) { "null" }
     }
 }

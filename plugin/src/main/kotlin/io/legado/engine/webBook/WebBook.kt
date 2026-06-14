@@ -191,6 +191,8 @@ object WebBook {
             pageCount++
         }
         var content = allParts.joinToString("\n")
+        // Legado: replaceRegex 前先每行trim
+        content = content.split("\n").joinToString("\n") { it.trim() }
         // Legado: replaceRegex 通过 analyzeRule.getString 解析，支持 @get/{{}} 规则
         if (!contentRule.replaceRegex.isNullOrBlank()) {
             val replaceAr = AnalyzeRule(source = bookSource).setContent(content, book.tocUrl ?: book.bookUrl)
@@ -372,10 +374,12 @@ object BookChapterList {
             // 批量应用 formatJs（与 Legado 一致，共享 gInt 计数器）
             if (!rule.formatJs.isNullOrBlank()) {
                 val gInt = intArrayOf(0)
-                for (ch in chapters) {
+                for ((idx, ch) in chapters.withIndex()) {
                     try {
                         val fAr = AnalyzeRule(ruleData = book, source = bookSource).setContent(ch.title, ch.url)
+                        fAr.setChapter(ch)
                         fAr.put("gInt", gInt[0].toString())
+                        fAr.put("index", (idx + 1).toString())
                         val formatted = fAr.getString(rule.formatJs!!)
                         if (formatted.isNotBlank()) ch.title = formatted
                         gInt[0]++
