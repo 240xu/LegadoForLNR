@@ -239,16 +239,44 @@ object WebBook {
     }
 
     /** Legado HtmlFormatter.formatKeepImg */
+    /** Legado HtmlFormatter.formatKeepImg: 保留<img>和格式的HTML清理 */
     private fun formatContentHtml(html: String, baseUrl: String): String {
         if (html.isBlank()) return ""
         return try {
             val doc = org.jsoup.Jsoup.parseBodyFragment(html, baseUrl)
-            val imgs = doc.select("img")
-            val imgSrcs = imgs.map { it.attr("src") }.filter { it.isNotBlank() }
-            val text = doc.body().text()
-            val sb = StringBuilder(text)
-            imgSrcs.forEach { src -> sb.appendLine("<img src=\"$src\">") }
-            sb.toString()
+            // 保留 <usehtml> 块
+            val useHtmlBlocks = mutableListOf<String>()
+            doc.select("usehtml").forEachIndexed { idx, el ->
+                useHtmlBlocks.add(el.html())
+                el.replaceWith(org.jsoup.nodes.TextNode(" USEHTML_${idx} "))
+            }
+            // <br> → 换行
+            doc.select("br").forEach { it.replaceWith(org.jsoup.nodes.TextNode("\n")) }
+            // <p>, <div>, <h1-h6>, <li> 前后加换行
+            doc.select("p, div, h1, h2, h3, h4, h5, h6, li, tr").forEach { el ->
+                el.prepend("\n")
+                el.append("\n")
+            }
+            // <img> 保留为占位符
+            val imgMap = mutableMapOf<String, String>()
+            doc.select("img").forEachIndexed { idx, el ->
+                val src = el.attr("src")
+                if (src.isNotBlank()) {
+                    val placeholder = " IMG_${idx} "
+                    imgMap[placeholder] = "<img src=\"$src\">"
+                    el.replaceWith(org.jsoup.nodes.TextNode(placeholder))
+                }
+            }
+            // 提取纯文本（保留换行）
+            var result = doc.body().text()
+            // 还原图片
+            imgMap.forEach { (k, v) -> result = result.replace(k, v) }
+            // 还原 <usehtml>
+            useHtmlBlocks.forEachIndexed { idx, block ->
+                result = result.replace(" USEHTML_${idx} ", block)
+            }
+            // 清理多余空行
+            result.replace(Regex("\n{3,}"), "\n\n").trim()
         } catch (_: Exception) { html }
     }
 }

@@ -259,7 +259,18 @@ interface JsExtensions {
         val cachePath = try { AndroidContext.appCtx.externalCacheDir?.absolutePath ?: "/tmp" } catch (_: Exception) { "/tmp" }
         return java.io.File(cachePath, path)
     }
-    fun cacheFile(urlStr: String, saveTime: Int): String = cacheFile(urlStr).absolutePath
+    fun cacheFile(urlStr: String, saveTime: Int): String {
+        // Legado: 下载文件并缓存，返回文件路径
+        val file = cacheFile(urlStr)
+        if (!file.exists()) {
+            try {
+                file.parentFile?.mkdirs()
+                val bytes = HttpClient.getByteArray(urlStr)
+                file.writeBytes(bytes)
+            } catch (_: Exception) {}
+        }
+        return file.absolutePath
+    }
     fun downloadFile(url: String): String {
         val file = cacheFile(url)
         file.parentFile?.mkdirs()

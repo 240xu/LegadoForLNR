@@ -310,7 +310,12 @@ class LoginJsBridge(
     fun fetchLoginData(): MutableMap<String, String> = loginData
 
     fun randomUUID(): String = java.util.UUID.randomUUID().toString()
-    fun androidId(): String = "legado_lnr_plugin"
+    fun androidId(): String = try {
+        android.provider.Settings.Secure.getString(
+            io.legado.engine.shim.AndroidContext.appCtx.contentResolver,
+            android.provider.Settings.Secure.ANDROID_ID
+        ) ?: "legado_lnr_plugin"
+    } catch (_: Exception) { "legado_lnr_plugin" }
 
 
     // ==================== SourceLoginJsExtensions 补充方法 ====================

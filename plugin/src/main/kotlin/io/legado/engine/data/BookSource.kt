@@ -12,6 +12,7 @@ data class BookSource(
     var bookSourceName: String = "",
     var bookSourceGroup: String? = null,
     var bookSourceType: Int = 0,
+    var bookSourceIcon: String? = null,
     var bookUrlPattern: String? = null,
     var customOrder: Int = 0,
     var enabled: Boolean = true,

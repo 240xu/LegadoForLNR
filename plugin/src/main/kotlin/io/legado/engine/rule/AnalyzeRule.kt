@@ -452,7 +452,7 @@ class AnalyzeRule(
                 ruleStr.startsWith("@XPath:", true) -> { mode = Mode.XPath; ruleStr.substring(7) }
                 ruleStr.startsWith("@Json:", true) -> { mode = Mode.Json; ruleStr.substring(6) }
                 isJSON || ruleStr.startsWith("$.") || ruleStr.startsWith("$[") -> { mode = Mode.Json; ruleStr }
-                ruleStr.startsWith("//") -> { mode = Mode.XPath; ruleStr }
+                ruleStr.startsWith("/") -> { mode = Mode.XPath; ruleStr }
                 else -> ruleStr
             }
             r = splitPutRule(r, putMap)
