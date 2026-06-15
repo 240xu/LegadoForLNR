@@ -408,6 +408,7 @@ object BookChapterList {
                         fAr.setChapter(ch)
                         fAr.put("gInt", gInt[0].toString())
                         fAr.put("index", (idx + 1).toString())
+                        fAr.put("title", ch.title)
                         val formatted = fAr.getString(rule.formatJs!!)
                         if (formatted.isNotBlank()) ch.title = formatted
                         gInt[0]++
@@ -415,7 +416,8 @@ object BookChapterList {
                 }
             }
         } catch (e: Exception) { Debug.log("BookChapterList error: " + e.message) }
-        if (reverse) chapters.reverse()
+        // Legado: 无-前缀时默认反转（API通常返回从新到旧），有-前缀时不反转
+        if (!reverse) chapters.reverse()
         return chapters
     }
 

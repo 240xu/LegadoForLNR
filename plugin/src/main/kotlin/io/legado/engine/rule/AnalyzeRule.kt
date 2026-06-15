@@ -581,7 +581,7 @@ class AnalyzeRule(
             val putMatcher = putPattern.matcher(vRuleStr)
             while (putMatcher.find()) {
                 vRuleStr = vRuleStr.replace(putMatcher.group(), "")
-                val putJsonStr = putMatcher.group(1)
+                val putJsonStr = putMatcher.group(1) ?: continue
                 val putJson = io.legado.engine.shim.GSON.fromJsonObject<Map<String, String>>(putJsonStr)
                 if (putJson != null) {
                     putMap.putAll(putJson)
@@ -629,9 +629,9 @@ class AnalyzeRule(
         )
         // $1/$2 正则捕获组引用
         private val regexPattern = java.util.regex.Pattern.compile("\\$\\d{1,2}")
-        // @put:{} 匹配模式
+        // @put:{} 匹配模式 — 括号捕获花括号内JSON内容
         private val putPattern = java.util.regex.Pattern.compile(
-            "@put:\\{.+?\\}", java.util.regex.Pattern.CASE_INSENSITIVE
+            "@put:(\\{[^}]+?\\})", java.util.regex.Pattern.CASE_INSENSITIVE
         )
 
         private fun unwrapJs(jsStr: String): String {
